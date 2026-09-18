@@ -165,15 +165,18 @@ export function rewriteInstrumentedSpecifiers(source) {
 
 function jsPreamble(typed) {
   const t = typed ? ": string | null" : "";
-  return `import { readFileSync } from "./__cb_fs.mjs";
-import { createRequire } from "node:module";
+  // Imports are aliased to internal names so a user script that itself imports
+  // `readFileSync` from "node:fs" (rewritten to ./__cb_fs.mjs) or `createRequire`
+  // from "node:module" does not collide with the preamble's bindings.
+  return `import { readFileSync as __cb_readFileSync } from "./__cb_fs.mjs";
+import { createRequire as __cb_createRequire } from "node:module";
 // Models write CommonJS as often as ESM. Provide require so both work — and
 // Note that introducing require() into a module that ALSO has top-level await
 // makes Node refuse the file outright. That is why the file read below is
 // synchronous rather than awaited.
-globalThis.require = globalThis.require || createRequire(import.meta.url);
+globalThis.require = globalThis.require || __cb_createRequire(import.meta.url);
 const filePath${t} = process.env.CB_FILE_ORIG || null;
-const content${t} = filePath ? readFileSync(filePath, "utf8") : null;
+const content${t} = filePath ? __cb_readFileSync(filePath, "utf8") : null;
 `;
 }
 

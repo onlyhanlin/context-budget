@@ -69,6 +69,67 @@ test("planRemoval removes only our key", () => {
   assert.equal(parsed.mcpServers["context-budget"], undefined);
 });
 
+test("readSettings strips a UTF-8 BOM before parsing", () => {
+  const file = path.join(dir, "bom.json");
+  fs.writeFileSync(file, "\uFEFF" + JSON.stringify({ mcpServers: {} }));
+  const result = mcp.readSettings(file);
+  assert.equal(result.error, null, `BOM should be stripped, got error: ${result.error}`);
+  assert.deepEqual(result.data, { mcpServers: {} });
+});
+
+test("readSettings rejects a top-level JSON array", () => {
+  const file = path.join(dir, "array.json");
+  fs.writeFileSync(file, JSON.stringify([1, 2, 3]));
+  const result = mcp.readSettings(file);
+  assert.match(result.error, /not a JSON object/);
+  assert.equal(result.data, null);
+});
+
+test("readSettings rejects mcpServers that is not an object", () => {
+  const file = path.join(dir, "bad-servers.json");
+  fs.writeFileSync(file, JSON.stringify({ mcpServers: ["not", "an", "object"] }));
+  const result = mcp.readSettings(file);
+  assert.match(result.error, /mcpServers.*not an object/);
+  assert.equal(result.data, null);
+});
+
+test("readSettings returns a default shape for a missing file", () => {
+  const file = path.join(dir, "missing.json");
+  const result = mcp.readSettings(file);
+  assert.equal(result.exists, false);
+  assert.deepEqual(result.data, { mcpServers: {} });
+  assert.equal(result.error, null);
+});
+
+test("planRemoval is unchanged when our key is absent", () => {
+  const file = path.join(dir, "no-key.json");
+  fs.writeFileSync(file, JSON.stringify({ mcpServers: { other: { command: "x" } } }));
+  const removal = mcp.planRemoval(file);
+  assert.equal(removal.action, "unchanged");
+});
+
+test("planRemoval skips a missing file", () => {
+  const file = path.join(dir, "absent.json");
+  const removal = mcp.planRemoval(file);
+  assert.equal(removal.action, "skip");
+});
+
+test("serverEntry contains the expected autoApprove list", () => {
+  const entry = mcp.serverEntry();
+  assert.equal(entry.command, "context-budget");
+  assert.deepEqual(entry.args, ["mcp"]);
+  assert.deepEqual(entry.disabled, false);
+  assert.ok(entry.autoApprove.includes("ctx_execute"));
+  assert.ok(entry.autoApprove.includes("ctx_search"));
+  assert.ok(!entry.autoApprove.includes("ctx_doctor"), "ctx_doctor must not be auto-approved");
+});
+
+test("isRegistered returns false for an unregistered file", () => {
+  const file = path.join(dir, "unregistered.json");
+  fs.writeFileSync(file, JSON.stringify({ mcpServers: { other: { command: "x" } } }));
+  assert.equal(mcp.isRegistered(file), false);
+});
+
 /* ---------------------------------------------------------------- install */
 
 /* The extension discovers hooks by exact file name (hook-factory.ts):

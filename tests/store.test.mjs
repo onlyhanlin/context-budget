@@ -121,3 +121,125 @@ test("purge empties the knowledge base", () => {
   assert.ok(store.purge() > 0);
   assert.equal(store.listSources().length, 0);
 });
+
+/* ------------------------------------------------- additional edge cases */
+
+test("chunkDocument returns empty for whitespace-only input", () => {
+  assert.deepEqual(store.chunkDocument(""), []);
+  assert.deepEqual(store.chunkDocument("   \n\n  \t  "), []);
+  assert.deepEqual(store.chunkDocument(null), []);
+});
+
+test("chunkDocument normalises Windows line endings", () => {
+  const doc = "# Title\r\n\r\nbody line\r\n## Sub\r\n\r\nsub body";
+  const chunks = store.chunkDocument(doc);
+  assert.ok(chunks.some((c) => c.title === "Title"));
+  assert.ok(chunks.some((c) => c.title === "Sub"));
+});
+
+test("chunkDocument keeps nested code fences intact", () => {
+  const doc = [
+    "# Code",
+    "```js",
+    "const a = 1;",
+    "```",
+    "",
+    "```js",
+    "const b = 2;",
+    "```",
+  ].join("\n");
+  const chunks = store.chunkDocument(doc);
+  assert.equal(chunks.length, 1);
+  assert.ok(chunks[0].body.includes("const a = 1;"));
+  assert.ok(chunks[0].body.includes("const b = 2;"));
+});
+
+test("chunkDocument handles a heading with no body text", () => {
+  const doc = "# Only Heading\n\n## Another\n\nactual body";
+  const chunks = store.chunkDocument(doc);
+  // The first heading has no body and should be dropped; "Another" carries text.
+  assert.ok(chunks.some((c) => c.title === "Another" && c.body.includes("actual body")));
+});
+
+test("isFresh reports null for an unknown source", () => {
+  assert.equal(store.isFresh("does-not-exist"), null);
+});
+
+test("isFresh reports a freshly indexed source as fresh", () => {
+  store.index({ source: "fresh-check", content: "# H\n\nbody" });
+  const info = store.isFresh("fresh-check");
+  assert.ok(info !== null);
+  assert.equal(info.fresh, true);
+  assert.ok(info.ageMs >= 0);
+});
+
+test("isFresh reports stale when the timestamp is old", () => {
+  store.index({ source: "stale-check", content: "# H\n\nbody" });
+  const handle = store.open();
+  handle.prepare("UPDATE sources SET ts = ? WHERE source = ?").run(Date.now() - 10 * 24 * 60 * 60 * 1000, "stale-check");
+  const info = store.isFresh("stale-check");
+  assert.equal(info.fresh, false);
+});
+
+test("forget returns 0 for a non-existent source", () => {
+  assert.equal(store.forget("never-existed"), 0);
+});
+
+test("index with empty content produces zero chunks but still records the source", () => {
+  const info = store.index({ source: "empty-content", content: "   " });
+  assert.equal(info.chunks, 0);
+  // The source row should still exist so a caller can detect it was indexed.
+  assert.ok(store.listSources().some((s) => s.source === "empty-content"));
+});
+
+test("index truncates overly long source names", () => {
+  const longName = "s".repeat(500);
+  const info = store.index({ source: longName, content: "# H\n\nbody" });
+  assert.equal(info.source.length, 200);
+});
+
+test("search with multiple queries answers each independently", () => {
+  store.index({ source: "multi-q", content: "## Alpha\n\nalpha content here\n\n## Beta\n\nbeta content here" });
+  const found = store.search(["alpha", "beta"]);
+  assert.equal(found.results.length, 2);
+  assert.equal(found.results[0].query, "alpha");
+  assert.equal(found.results[1].query, "beta");
+  assert.ok(found.results[0].matches.length >= 1);
+  assert.ok(found.results[1].matches.length >= 1);
+});
+
+test("search OR mode matches when only one term appears", () => {
+  store.index({ source: "or-mode", content: "## Only\n\nunicorn exists here" });
+  const and = store.search(["unicorn nonexistent"], { mode: "and" });
+  const or = store.search(["unicorn nonexistent"], { mode: "or" });
+  // AND with the substring fallback might still match; OR should definitely match.
+  assert.ok(or.results[0].matches.length >= 1);
+  assert.ok(or.results[0].matches.length >= and.results[0].matches.length);
+});
+
+test("search returns the vocabulary of all query terms", () => {
+  store.index({ source: "vocab", content: "hello world foo bar" });
+  const found = store.search(["hello", "world foo"]);
+  assert.ok(found.vocabulary.includes("hello"));
+  assert.ok(found.vocabulary.includes("world"));
+  assert.ok(found.vocabulary.includes("foo"));
+});
+
+test("gc removes chunks older than the retention window", () => {
+  store.index({ source: "gc-old", content: "# H\n\nold body" });
+  const handle = store.open();
+  const oldTs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  handle.prepare("UPDATE chunks SET ts = ? WHERE source = ?").run(oldTs, "gc-old");
+  handle.prepare("UPDATE sources SET ts = ? WHERE source = ?").run(oldTs, "gc-old");
+  store.gc();
+  assert.equal(store.forget("gc-old"), 0, "old chunks should already be gone after gc");
+});
+
+test("search across sources with perQuery limit distributes hits", () => {
+  store.index({ source: "src-a", content: "## S\n\nneedle in a1\nneedle in a2" });
+  store.index({ source: "src-b", content: "## S\n\nneedle in b1" });
+  const found = store.search(["needle"], { limit: 10, perQuery: 1 });
+  const sources = new Set(found.results[0].matches.map((m) => m.source));
+  assert.ok(sources.has("src-a"));
+  assert.ok(sources.has("src-b"));
+});

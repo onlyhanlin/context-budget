@@ -118,3 +118,119 @@ test("runs an actual shell command and captures its output", async () => {
   assert.equal(res.exitCode, 0);
   assert.equal(res.stdout.trim(), "2");
 });
+
+/* ------------------------------------------------- additional edge cases */
+
+test("user importing readFileSync does not collide with the preamble", async () => {
+  // Regression test: the preamble aliases its own readFileSync import so a
+  // user script that imports readFileSync from "node:fs" (rewritten to
+  // ./__cb_fs.mjs) no longer triggers "Identifier 'readFileSync' has already
+  // been declared".
+  const file = path.join(dir, "conflict.txt");
+  fs.writeFileSync(file, "data".repeat(1000), "utf8");
+  const res = await run({
+    language: "javascript",
+    code: 'import { readFileSync } from "node:fs";\nconst t = readFileSync(process.env.CB_TARGET, "utf8");\nconsole.log("len=" + t.length);',
+    env: { CB_TARGET: file },
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.equal(res.stdout.trim(), "len=4000");
+});
+
+test("user importing createRequire does not collide with the preamble", async () => {
+  const res = await run({
+    language: "javascript",
+    code: 'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);\nconsole.log("has-require=" + typeof r);',
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.ok(res.stdout.includes("has-require=function"));
+});
+
+test("user importing the default fs export still works and is instrumented", async () => {
+  const file = path.join(dir, "default-fs.txt");
+  fs.writeFileSync(file, "z".repeat(1000), "utf8");
+  const res = await run({
+    language: "javascript",
+    code: 'import fs from "node:fs";\nconst t = fs.readFileSync(process.env.CB_TARGET, "utf8");\nconsole.log("len=" + t.length);',
+    env: { CB_TARGET: file },
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.equal(res.stdout.trim(), "len=1000");
+  assert.ok(res.bytesRead >= 1000, `bytesRead should be >= 1000, got ${res.bytesRead}`);
+});
+
+test("stdoutCaptured holds the full output even when truncated", async () => {
+  const res = await run({
+    language: "javascript",
+    code: 'process.stdout.write("x".repeat(50000));',
+    maxOutputBytes: 1024,
+  });
+  assert.equal(res.truncated, true);
+  // stdoutCaptured is what gets indexed; it must contain more than the model sees.
+  assert.ok(res.stdoutCaptured.length >= 50000, "captured output should retain the full payload");
+  assert.ok(res.stdout.length <= 1024 + 64, "model-facing output is capped");
+});
+
+test("stderr is capped and never exposes the stats sentinel", async () => {
+  const res = await run({
+    language: "javascript",
+    code: 'for (let i = 0; i < 1000; i++) console.error("line " + i);',
+  });
+  assert.equal(res.exitCode, 0);
+  assert.ok(!res.stderr.includes("__CB_STATS__"), "sentinel must always be stripped");
+  // stderr is capped at 256KB; 1000 short lines should fit but the cap is enforced.
+  assert.ok(Buffer.byteLength(res.stderr, "utf8") <= 256 * 1024 + 256);
+});
+
+test("a thrown error surfaces its stack in stderr and exitCode is non-zero", async () => {
+  const res = await run({
+    language: "javascript",
+    code: 'throw new Error("boom");',
+  });
+  assert.notEqual(res.exitCode, 0);
+  assert.ok(res.stderr.includes("boom"));
+  assert.ok(!res.ok);
+});
+
+test("runCommand refuses a denied command without spawning", async () => {
+  const res = await runCommand("rm -rf /");
+  assert.equal(res.refused, true);
+  assert.equal(res.command, null);
+  assert.ok(res.stderr.includes("refused by context-budget policy"));
+});
+
+test("runCommand allows a benign command", async () => {
+  const res = await runCommand('node -e "console.log(\'ok\')"', { cwd: dir });
+  assert.equal(res.ok, true);
+  assert.equal(res.stdout.trim(), "ok");
+});
+
+test("normalizeLanguage handles null, undefined and case", () => {
+  assert.equal(normalizeLanguage(null), null);
+  assert.equal(normalizeLanguage(undefined), null);
+  assert.equal(normalizeLanguage(""), null);
+  assert.equal(normalizeLanguage("  "), null);
+  assert.equal(normalizeLanguage("JavaScript"), "javascript");
+  assert.equal(normalizeLanguage("PY"), "python");
+  assert.equal(normalizeLanguage("PowerShell"), "powershell");
+});
+
+test("the full stdout count is reported for accounting even on truncation", async () => {
+  const res = await run({
+    language: "javascript",
+    code: 'process.stdout.write("a".repeat(100000));',
+    maxOutputBytes: 512,
+  });
+  assert.ok(res.stdoutBytesTotal >= 100000, "stdoutBytesTotal must reflect what the process actually wrote");
+  assert.ok(res.bytesOut <= 512 + 64);
+});
+
+test("ctxExecute-style run with empty code still returns a structured result", async () => {
+  // The sandbox itself does not reject empty code (the tool layer does); it
+  // just runs an empty script. Verify the result shape is well-formed.
+  const res = await run({ language: "javascript", code: "" });
+  assert.equal(typeof res.ok, "boolean");
+  assert.equal(typeof res.stdout, "string");
+  assert.equal(typeof res.exitCode, "number");
+  assert.equal(typeof res.durationMs, "number");
+});
