@@ -208,6 +208,10 @@ const RUNTIMES = {
     candidates: ["python", "python3", "py"],
     ext: ".py",
     args: (file) => [file],
+    // Python on Windows encodes piped stdout with the ANSI codepage and
+    // errors="replace", silently turning every non-ASCII character into '?'.
+    // UTF-8 mode keeps both the source and the output byte-exact.
+    env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
     preamble: () =>
       `import os\n` +
       `filePath = os.environ.get("CB_FILE_ORIG")\n` +
@@ -400,7 +404,9 @@ export async function run({
   }
 
   const args = [...flagArgs, ...spec.args(file)];
-  const env = sandboxEnv({ ...extraEnv, CB_FILE_ORIG: filePath ?? "", CB_SANDBOX_DIR: dir });
+  // spec.env provides runtime-level defaults (e.g. Python UTF-8 mode); an
+  // explicit per-run env deliberately wins over them.
+  const env = sandboxEnv({ ...spec.env, ...extraEnv, CB_FILE_ORIG: filePath ?? "", CB_SANDBOX_DIR: dir });
 
   const started = Date.now();
   // How much stdout we are willing to hold in memory. `maxOutputBytes` caps what
@@ -506,9 +512,12 @@ export async function run({
 /** Convenience wrapper: run a single shell command through the deny-list first. */
 export async function runCommand(command, opts = {}) {
   const verdict = checkCommand(command);
-  if (!verdict.allowed) {
+  // A null verdict means the command was empty/absent — refuse it the same way
+  // as a denied command instead of crashing on property access.
+  if (!verdict || !verdict.allowed) {
     return {
-      ok: false, stdout: "", stderr: verdict.reason,
+      ok: false, stdout: "",
+      stderr: verdict?.reason ?? "refused by context-budget policy: empty or missing command.",
       exitCode: null, timedOut: false, truncated: false, durationMs: 0,
       language: "shell", command: null, bytesOut: 0, stdoutCaptured: "", stdoutBytesTotal: 0, bytesRead: 0, refused: true,
     };

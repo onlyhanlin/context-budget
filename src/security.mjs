@@ -16,7 +16,9 @@ const DENY_RULES = [
   { re: /\bmkfs(\.|\s)/, why: "filesystem format" },
   { re: /\bdd\s+[^|]*of=\/dev\/(sd|nvme|hd)/, why: "raw write to a block device" },
   { re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, why: "fork bomb" },
-  { re: /(^|[;&|]\s*)(sudo\s+)?(shutdown|reboot|halt)(\s|$)/, why: "host power control" },
+  // Backticks and $() are command substitution; a newline is a command
+  // separator — all three put the keyword in execution position.
+  { re: /(^|[;&|\n]\s*|`|\$\()(sudo\s+)?(shutdown|reboot|halt)(\s|$|[`)])/, why: "host power control" },
   { re: /\bformat\s+[a-zA-Z]:/i, why: "Windows volume format" },
   { re: /\bRemove-Item\b[^|]*-Recurse[^|]*-Force[^|]*\b[A-Za-z]:\\(\s|$)/i, why: "recursive delete of a drive root" },
   { re: /\bgit\s+push\s+[^|]*(?:--force\b|-f\b)(?!-with-lease)/, why: "force push (use --force-with-lease)" },
@@ -44,7 +46,7 @@ export function checkCommand(command) {
  * is allowed, which keeps behaviour predictable across platforms.
  */
 export function resolveInsideWorkspace(root, candidate) {
-  if (!candidate) return { ok: false, error: "path is required" };
+  if (!candidate || typeof candidate !== "string") return { ok: false, error: "path is required" };
   const abs = path.resolve(root, candidate);
   const rel = path.relative(root, abs);
   const inside = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
