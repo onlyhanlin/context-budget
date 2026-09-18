@@ -1,0 +1,35 @@
+{
+  "name": "context-budget",
+  "version": "0.1.0",
+  "description": "Keep raw tool output out of the context window. Sandboxed execution, indexed recall, and token accounting for Cline and any MCP client.",
+  "keywords": ["mcp", "context-window", "token-budget", "cline", "sandbox", "llm", "agent"],
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.5" },
+  "bin": {
+    "context-budget": "./bin/cli.mjs",
+    "cbudget": "./bin/cli.mjs"
+  },
+  "files": ["bin", "src", "hooks", "rules", "README.md", "README.zh-CN.md"],
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning bin/cli.mjs mcp",
+    "mcp": "node --disable-warning=ExperimentalWarning bin/cli.mjs mcp",
+    "stats": "node --disable-warning=ExperimentalWarning bin/cli.mjs stats",
+    "doctor": "node --disable-warning=ExperimentalWarning bin/cli.mjs doctor",
+    "setup": "node bin/cli.mjs setup",
+    "setup:apply": "node bin/cli.mjs setup --yes",
+    "doctor:fix": "node bin/cli.mjs doctor --fix",
+    "test": "node --disable-warning=ExperimentalWarning --test \"tests/*.test.mjs\"",
+    "test:e2e": "node --disable-warning=ExperimentalWarning tests/e2e-mcp.mjs",
+    "test:scenario": "node tests/scenario.mjs",
+    "test:workflow": "node tests/workflow.mjs",
+    "test:audit": "node tests/audit.mjs",
+    "test:audit2": "node tests/audit2.mjs",
+    "test:audit3": "node tests/audit3.mjs",
+    "test:all": "npm test && npm run test:e2e && npm run test:scenario && npm run test:workflow && npm run test:audit && npm run test:audit2 && npm run test:audit3",
+    "bench": "node --disable-warning=ExperimentalWarning bench/ab-compare.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0"
+  }
+}

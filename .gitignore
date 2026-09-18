@@ -1,0 +1,9 @@
+node_modules/
+.npm-cache/
+
+# Generated hook launchers contain absolute machine paths — never commit them.
+.clinerules/hooks/
+.cline/
+*.log
+.context-budget/
+tmp/

@@ -1,0 +1,12 @@
+# Normalise line endings in the repository; check files out with the platform default.
+* text=auto
+
+*.mjs text eol=lf
+*.js  text eol=lf
+*.json text eol=lf
+*.md  text eol=lf
+*.yml text eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
