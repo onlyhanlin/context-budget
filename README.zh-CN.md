@@ -17,14 +17,21 @@
 git clone https://github.com/onlyhanlin/context-budget.git
 cd context-budget && npm install && npm link
 
-# 2. 装进你的项目 —— 先 DRY RUN，它什么都不会写
-cd /path/to/your/project
+# 2. 安装 —— 先 DRY RUN，它什么都不会写
 context-budget setup          # 只显示将要做的改动
-context-budget setup --yes    # 执行：钩子 + 规则 + 注册 MCP
+
+#    下面两个**二选一**：
+context-budget setup --yes              # 只装当前项目
+context-budget setup --global --yes     # 装一次，所有项目生效
 
 # 3. 自检
 context-budget doctor
 ```
+
+**选哪个？** 两种方式下 **MCP server 都是全局注册的**——它待在 Cline 的配置里，
+不在你的项目里。这个选择只影响路由规则和钩子文件：`--global` 会把它们写进
+`~/Documents/Cline/`，之后每个工作区都自动生效，不用再跑 `setup`。想单独调某个
+仓库就用按项目的形式；想处处都有就用 `--global`。**两者可以并存。**
 
 然后做那件谁都替你做不了的事：
 
@@ -86,8 +93,13 @@ context-budget setup
 ### 第 3 步 —— 执行
 
 ```bash
-context-budget setup --yes
+context-budget setup --yes              # 只装当前项目
+context-budget setup --global --yes     # 装一次，所有项目生效
 ```
+
+**二选一。** 两种方式下 **MCP server 都是全局注册的**——它在 Cline 的配置文件里，
+不在项目里。这个参数只决定路由规则和钩子文件写到哪里。**用户没特别要求按项目安装时，
+优先用 `--global`**，因为那样以后都不用再跑 `setup`。
 
 它只写自己拥有的文件（每个都带 `context-budget:generated` 标记），往每个
 `cline_mcp_settings.json` 里只合并一个键，并且在改动前落一个带时间戳的
@@ -217,7 +229,7 @@ npm link
 ```bash
 cd /path/to/your/project
 context-budget setup          # 默认 DRY RUN，只打印将要做的改动
-context-budget setup --yes    # 真正执行
+context-budget setup --yes    # 只装当前项目（想全局生效见 2b）
 ```
 
 `setup` 是**真正的安装程序**，不是让你复制粘贴的配置片段。它会：
@@ -256,10 +268,36 @@ DRY RUN — nothing was written. Re-run with --yes to apply.
 ```
 
 ```bash
-context-budget setup --global      # 全局规则 + 钩子，对所有工作区生效
 context-budget setup --hooks-only  # 只装钩子，不注册 MCP
 context-budget setup --mcp-only    # 只注册 MCP，不装钩子
 ```
+
+### 2b. 全局安装 —— 装一次，所有项目生效
+
+**MCP server 本来就是全局的。** 它待在**编辑器**的配置文件里，不在项目里，
+所以注册一次就覆盖你之后打开的所有工作区。
+
+按项目跑 `setup` 额外装的是路由规则和钩子文件。不想在每个仓库里都跑一遍：
+
+```bash
+context-budget setup --global --yes
+```
+
+它会写进 Cline 自己的全局目录，所有工作区都会读到：
+
+| 内容 | 位置 |
+|---|---|
+| 路由规则 | `~/Documents/Cline/Rules/context-budget.md` |
+| 钩子 | `~/Documents/Cline/Hooks/PreToolUse`、`PostToolUse`、`PreCompact`、`TaskResume`（Windows 下是 `.ps1`） |
+
+全局钩子和工作区钩子**都会跑**——Cline 会执行它找到的每一个钩子目录。
+所以项目只能给全局集合做加法，关不掉它。
+
+> **一个钩子槽位只放一个文件。** Cline 只按一个确切文件名查找，所以如果
+> `~/Documents/Cline/Hooks/PreToolUse` 已经是你自己写的钩子，`setup` 会报
+> **CONFLICT** 并原样保留，绝不覆盖。合并或移走它，再重跑。
+
+`context-budget uninstall --global --yes` 精确回滚，且只动带我们标记的文件。
 
 ### 3. 手工配置 MCP server
 
@@ -416,6 +454,10 @@ context-budget uninstall --yes    # 精确回滚 setup 做过的事
 
 CLI：`context-budget mcp | setup | mcp-config | uninstall | doctor | stats | sources | index | search | purge | reset | hook | version`。
 
+`setup` 参数：`--yes`（真正执行，默认是 dry run）· `--global`（规则和钩子写给所有工作区，
+而不是当前这一个）· `--hooks-only` · `--mcp-only`。
+`doctor` 参数：`--fix`。`uninstall` 参数：`--global`。
+
 ---
 
 ## 原理
@@ -458,10 +500,17 @@ gzip 页面会低报 3–4 倍。
 
 ## 已知限制（先读再评价）
 
-1. **Cline 扩展官方不支持 Windows 钩子。** Cline 自己的钩子文档写明钩子通过
-   shebang 感知的 shell 执行，且 Windows "not currently supported"。`setup` 仍然会写
-   `.cmd` 和 Node 原生 `.mjs` 启动器，但在 Windows 上请把钩子当作 best-effort：
-   先跑第 5 步那条 echo 命令验证再依赖路由。**沙箱工具本身不受影响**，各平台都能用。
+1. **钩子文件名是硬性契约，而且各平台不一样。** Cline 对每个钩子只找**一个**
+   确切文件名（`apps/vscode/src/core/hooks/hook-factory.ts`）：
+
+   | 平台 | 扩展钩子 | CLI 钩子 |
+   |---|---|---|
+   | Windows | `<名字>.ps1` —— **无扩展名文件会被忽略** | `<名字>.sh` |
+   | macOS / Linux | 无扩展名的 `<名字>`，且必须有**可执行位** —— **`.ps1` 会被忽略** | `<名字>.sh` |
+
+   写错那一个，钩子就永不触发，而且不会报任何错。`context-budget setup` 会按它运行的
+   平台写正确的那个，`context-budget doctor` 会报告它找到了什么。Windows 上没有
+   `chmod` 这回事，这正是需要 PowerShell 启动器的原因。
 2. **Cline 钩子的输出字段是 `contextModification`，不是 `context`。** 扩展校验的是
    `{ cancel, contextModification, errorMessage }`
    （`apps/vscode/src/core/hooks/hook-factory.ts`）；SDK 的文件钩子读的是
@@ -500,7 +549,7 @@ npm run test:workflow # 真实联网端到端
 npm run test:audit    # 84 项：每个工具、每条 CLI 命令、每个钩子
 npm run test:audit2   # 38 项：协议滥用、脏存储、并发
 npm run test:audit3   # 30 项：数据丢失、检索质量、TTL
-npm run test:recipe   # 35 项：把本文档里的安装步骤真跑一遍
+npm run test:recipe   # 53 项：把本文档里的安装步骤真跑一遍
 npm run test:all      # 以上全部
 npm run bench -- src  # 载荷对比
 ```

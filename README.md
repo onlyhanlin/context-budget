@@ -18,14 +18,23 @@ An MCP server plus Cline hooks. Works with any MCP client; the hooks are Cline's
 git clone https://github.com/onlyhanlin/context-budget.git
 cd context-budget && npm install && npm link
 
-# 2. Install into your project — DRY RUN first, it writes nothing
-cd /path/to/your/project
+# 2. Install — DRY RUN first, it writes nothing
 context-budget setup          # shows exactly what it would change
-context-budget setup --yes    # apply: hooks + rules + MCP registration
+
+#    Pick ONE of these two:
+context-budget setup --yes              # this project only
+context-budget setup --global --yes     # every project, installed once
 
 # 3. Check
 context-budget doctor
 ```
+
+**Which one?** The MCP server is registered globally either way — it lives in
+Cline's settings, not in your project. The choice only affects the routing rules
+and hook files: `--global` puts them in `~/Documents/Cline/` so every workspace
+gets them without running `setup` again. Use the per-project form when you want
+to tune one repository; use `--global` when you just want it everywhere.
+Both can coexist.
 
 Then do the one step nothing can do for you:
 
@@ -89,8 +98,14 @@ hook the user wrote themselves, stop and ask before overwriting it.**
 ### Step 3 — apply
 
 ```bash
-context-budget setup --yes
+context-budget setup --yes              # this project only
+context-budget setup --global --yes     # every project, installed once
 ```
+
+**Choose one.** The MCP server is registered globally in both cases — it lives
+in Cline's settings file, not in the project. The flag only decides where the
+routing rules and hook files go. Prefer `--global` when the user has not asked
+for a project-scoped install, because it means never running `setup` again.
 
 This writes only files it owns (each carries a `context-budget:generated`
 marker), merges exactly one key into each `cline_mcp_settings.json`, and takes a
@@ -230,7 +245,7 @@ source.
 ```bash
 cd /path/to/your/project
 context-budget setup          # DRY RUN — shows exactly what it would change
-context-budget setup --yes    # apply
+context-budget setup --yes    # apply to this project (see 2b for global)
 ```
 
 `setup` is a real installer, not a snippet to paste. It:
@@ -271,10 +286,39 @@ DRY RUN — nothing was written. Re-run with --yes to apply.
 ```
 
 ```bash
-context-budget setup --global      # rules + hooks for every workspace
 context-budget setup --hooks-only  # skip MCP registration
 context-budget setup --mcp-only    # skip the hook files
 ```
+
+### 2b. Global install — once, for every project
+
+**The MCP server is already global.** It lives in the *editor's* settings file,
+not in the project, so registering it once covers every workspace you ever open.
+
+What a per-project `setup` adds is the routing rules and the hook files. If you
+would rather not run `setup` in every repository:
+
+```bash
+context-budget setup --global --yes
+```
+
+That writes into Cline's own global directories, which every workspace reads:
+
+| What | Where |
+|---|---|
+| Routing rules | `~/Documents/Cline/Rules/context-budget.md` |
+| Hooks | `~/Documents/Cline/Hooks/PreToolUse`, `PostToolUse`, `PreCompact`, `TaskResume` (Windows: `.ps1`) |
+
+Global and workspace hooks all run — Cline executes every hooks directory it
+finds. A project can therefore add to the global set, but it cannot switch it off.
+
+> **A hook slot holds exactly one file.** Cline looks for one exact file name, so
+> if `~/Documents/Cline/Hooks/PreToolUse` is already a hook you wrote, `setup`
+> reports a **CONFLICT** and leaves it untouched rather than overwriting it.
+> Merge it, move it aside, then re-run.
+
+`context-budget uninstall --global --yes` reverses exactly that, and touches
+only files carrying our marker.
 
 ### 3. Configuring the MCP server by hand
 
@@ -448,6 +492,10 @@ three safety valves:
 
 CLI: `context-budget mcp | setup | mcp-config | uninstall | doctor | stats | sources | index | search | purge | reset | hook | version`.
 
+`setup` flags: `--yes` (apply; default is a dry run) · `--global` (rules + hooks for
+every workspace instead of this one) · `--hooks-only` · `--mcp-only`.
+`doctor` flag: `--fix`. `uninstall` flag: `--global`.
+
 ---
 
 ## How it works
@@ -504,12 +552,19 @@ falling back to OR and then to a substring scan for partial identifiers.
 
 ## Known limits — read these before you judge it
 
-1. **Windows hooks are not officially supported by the Cline extension.** Cline's
-   own hook documentation states hooks are executed through a shebang-aware shell
-   and that Windows is "not currently supported". `setup` still writes a
-   `.cmd` launcher and a Node-native `.mjs` launcher, but on Windows treat
-   hooks as best-effort: run the Step 5 echo command before relying on routing.
-   The sandbox tools themselves are unaffected — they work everywhere.
+1. **Hook file names are a hard contract, and they differ per platform.** Cline
+   looks for exactly one file per hook
+   (`apps/vscode/src/core/hooks/hook-factory.ts`):
+
+   | Platform | Extension hooks | CLI hooks |
+   |---|---|---|
+   | Windows | `<HookName>.ps1` — an extensionless file is **ignored** | `<HookName>.sh` |
+   | macOS / Linux | extensionless `<HookName>`, and it must be **executable** — a `.ps1` is **ignored** | `<HookName>.sh` |
+
+   Writing the wrong one produces a hook that never runs and never says why.
+   `context-budget setup` writes the right one for the platform it runs on, and
+   `context-budget doctor` reports what it found. Windows has no `chmod`, which
+   is the whole reason a PowerShell launcher exists.
 2. **Cline's hook output field is `contextModification`, not `context`.** The
    extension validates `{ cancel, contextModification, errorMessage }`
    (`apps/vscode/src/core/hooks/hook-factory.ts`); the SDK file hooks read
@@ -560,7 +615,7 @@ npm run test:workflow # live network end to end
 npm run test:audit    # 84 checks: every tool, every CLI command, every hook
 npm run test:audit2   # 38 checks: protocol abuse, dirty storage, concurrency
 npm run test:audit3   # 30 checks: data loss, retrieval quality, TTL
-npm run test:recipe   # 35 checks: executes the install recipe in this README
+npm run test:recipe   # 53 checks: executes the install recipe in this README
 npm run test:all      # all of the above
 npm run bench -- src  # payload comparison
 ```

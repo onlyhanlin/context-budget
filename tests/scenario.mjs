@@ -26,7 +26,9 @@ fs.writeFileSync(path.join(work, "big-module.ts"), "export const x = 1;\n".repea
 const { workspacePlan, applyPlan } = await import(pathToFileURL(path.join(root, "hooks", "install.mjs")).href);
 applyPlan(workspacePlan(work));
 
-const hook = (event) => path.join(work, ".cline", "hooks", `${event}.mjs`);
+// Run the entry point itself: every generated launcher execs exactly this file,
+// and the launchers' names, bits and contents are asserted in install.test.mjs.
+const hook = (event) => path.join(root, "hooks", `${event}.mjs`);
 
 function run(event, payload, env = {}) {
   const result = spawnSync(process.execPath, [hook(event)], {

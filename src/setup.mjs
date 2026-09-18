@@ -55,11 +55,18 @@ export function formatPlan(plan) {
   if (!plan.mcpOnly) {
     const counts = countByAction(plan.files);
     lines.push(
-      `Hook + rules files: ${counts.create ?? 0} to create, ${counts.update ?? 0} to update, ${counts.unchanged ?? 0} already current`
+      `Hook + rules files: ${counts.create ?? 0} to create, ${counts.update ?? 0} to update, ` +
+        `${counts.unchanged ?? 0} already current` +
+        (counts.conflict ? `, ${counts.conflict} CONFLICT` : "")
     );
     for (const item of plan.files) {
       const rel = plan.global ? path.relative(os.homedir(), item.file) : path.relative(plan.root, item.file);
       lines.push(`  ${item.action.padEnd(9)} ${rel || item.file}   (${item.note})`);
+    }
+    if (counts.conflict) {
+      lines.push("");
+      lines.push("CONFLICTS — a hook slot holds exactly one file, so these cannot coexist:");
+      lines.push("  Move or merge the existing file, then re-run. Nothing was overwritten.");
     }
     lines.push("");
   }
@@ -91,11 +98,12 @@ export function formatPlan(plan) {
 }
 
 export function applySetup(plan) {
-  const result = { files: [], blocked: [], merges: [], backups: [] };
+  const result = { files: [], blocked: [], conflicts: [], merges: [], backups: [] };
   if (!plan.mcpOnly) {
     const applied = applyPlan(plan.files);
     result.files = applied.written;
     result.blocked = applied.blocked;
+    result.conflicts = applied.conflicts;
   }
   if (!plan.hooksOnly) {
     for (const { target, plan: merge } of plan.merges) {

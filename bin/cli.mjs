@@ -114,6 +114,10 @@ async function main() {
       out("");
       out(`applied: ${result.files.length} file(s) written`);
       for (const problem of result.blocked ?? []) out(`  SKIPPED  ${problem}`);
+      for (const problem of result.conflicts ?? []) {
+        out(`  CONFLICT ${problem}`);
+        out("           left untouched — merge or move it, then re-run");
+      }
       for (const m of result.merges) {
         out(`  mcp ${String(m.action).padEnd(9)} ${m.file}`);
       }

@@ -10,9 +10,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const install = await import(pathToFileURL(path.join(root, "hooks", "install.mjs")).href);
+const extHookFile = (name) => install.extensionHookFile(name, process.platform);
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "cb-audit-"));
 const store = path.join(work, "store");
 
@@ -304,9 +306,9 @@ check("cli", "setup is a dry run by default", /DRY RUN/.test(dry.stdout), dry.st
 check("cli", "dry run writes no hook files", !fs.existsSync(path.join(demo, ".clinerules")), "found .clinerules");
 
 const applied = cli(["setup", "--yes", "--hooks-only"], { project: demo, env: { CONTEXT_BUDGET_DIR: demoStore } });
-check("cli", "setup --yes writes the hook files", fs.existsSync(path.join(demo, ".clinerules", "hooks", "PreToolUse")));
+check("cli", "setup --yes writes the hook files", fs.existsSync(path.join(demo, ".clinerules", "hooks", extHookFile("pretooluse"))));
 check("cli", "setup writes all four hook events",
-  ["PreToolUse", "PostToolUse", "PreCompact", "TaskResume"].every((n) => fs.existsSync(path.join(demo, ".clinerules", "hooks", n))),
+  ["pretooluse", "posttooluse", "precompact", "taskresume"].every((n) => fs.existsSync(path.join(demo, ".clinerules", "hooks", extHookFile(n)))),
   fs.readdirSync(path.join(demo, ".clinerules", "hooks")).join(", "));
 check("cli", "setup verification passes", /\[x\] hook entry exists: pretooluse/.test(applied.stdout), applied.stdout.slice(-400));
 
@@ -316,14 +318,14 @@ check("cli", "a second setup is a no-op", /0 to create, 0 to update/.test(second
 const userFile = path.join(demo, ".clinerules", "hooks", "MyOwnHook");
 fs.writeFileSync(userFile, "#!/usr/bin/env bash\necho '{}'\n");
 const un = cli(["uninstall", "--yes"], { project: demo, env: { CONTEXT_BUDGET_DIR: demoStore } });
-check("cli", "uninstall removes generated files", !fs.existsSync(path.join(demo, ".clinerules", "hooks", "PreToolUse")));
+check("cli", "uninstall removes generated files", !fs.existsSync(path.join(demo, ".clinerules", "hooks", extHookFile("pretooluse"))));
 check("cli", "uninstall keeps a user-written hook", fs.existsSync(userFile), "user hook was deleted");
-check("cli", "uninstall reports the removal count", /removed 17 generated file/.test(un.stdout), un.stdout.slice(0, 200));
+check("cli", "uninstall reports the removal count", /removed 9 generated file/.test(un.stdout), un.stdout.slice(0, 200));
 
 /* ------------------------------------------------------------- repair */
 const demo2 = fs.mkdtempSync(path.join(os.tmpdir(), "cb-audit-demo2-"));
 cli(["setup", "--yes", "--hooks-only"], { project: demo2, env: { CONTEXT_BUDGET_DIR: path.join(demo2, "store") } });
-const target = path.join(demo2, ".cline", "hooks", "PreToolUse.mjs");
+const target = path.join(demo2, ".cline", "hooks", "PreToolUse.sh");
 fs.writeFileSync(target, fs.readFileSync(target, "utf8").replace(/context-budget:entry=.*/, "context-budget:entry=" + path.join(demo2, "gone", "pretooluse.mjs")));
 const fixed = cli(["doctor", "--fix"], { project: demo2, env: { CONTEXT_BUDGET_DIR: path.join(demo2, "store") } });
 check("cli", "doctor --fix repairs a stale launcher", /repaired 1 stale launcher/.test(fixed.stdout), fixed.stdout.slice(-400));
@@ -339,7 +341,7 @@ fs.writeFileSync(path.join(hookWork, "fat.txt"), "x".repeat(80000));
 cli(["setup", "--yes", "--hooks-only"], { project: hookWork, env: { CONTEXT_BUDGET_DIR: hookStore } });
 
 function hook(event, payload, env = {}) {
-  const res = spawnSync(process.execPath, [path.join(hookWork, ".cline", "hooks", `${event}.mjs`)], {
+  const res = spawnSync(process.execPath, [path.join(root, "hooks", `${event}.mjs`)], {
     input: JSON.stringify(payload),
     encoding: "utf8",
     env: { ...process.env, CONTEXT_BUDGET_DIR: hookStore, CONTEXT_BUDGET_PROJECT: hookWork, ...env },
@@ -373,10 +375,10 @@ check("hooks", "CONTEXT_BUDGET_FETCH=off is silent", fetchOff.cancel === false &
 const hookOff = hook("PreToolUse", { hookName: "PreToolUse", preToolUse: { toolName: "fetch_web_content", parameters: {} } }, { CONTEXT_BUDGET_HOOKS: "off" });
 check("hooks", "CONTEXT_BUDGET_HOOKS=off disables routing", hookOff.cancel === false && hookOff.contextModification === undefined);
 
-const garbage = spawnSync(process.execPath, [path.join(hookWork, ".cline", "hooks", "PreToolUse.mjs")], { input: "not json at all", encoding: "utf8", env: { ...process.env, CONTEXT_BUDGET_DIR: hookStore } });
+const garbage = spawnSync(process.execPath, [path.join(root, "hooks", "pretooluse.mjs")], { input: "not json at all", encoding: "utf8", env: { ...process.env, CONTEXT_BUDGET_DIR: hookStore } });
 check("hooks", "malformed stdin fails open", garbage.status === 0 && JSON.parse(garbage.stdout).cancel === false, garbage.stdout);
 
-const emptyStdin = spawnSync(process.execPath, [path.join(hookWork, ".cline", "hooks", "PreToolUse.mjs")], { input: "", encoding: "utf8", env: { ...process.env, CONTEXT_BUDGET_DIR: hookStore } });
+const emptyStdin = spawnSync(process.execPath, [path.join(root, "hooks", "pretooluse.mjs")], { input: "", encoding: "utf8", env: { ...process.env, CONTEXT_BUDGET_DIR: hookStore } });
 check("hooks", "empty stdin fails open", emptyStdin.status === 0 && JSON.parse(emptyStdin.stdout).cancel === false, emptyStdin.stdout);
 
 /* compaction */

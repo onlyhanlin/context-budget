@@ -71,23 +71,76 @@ test("planRemoval removes only our key", () => {
 
 /* ---------------------------------------------------------------- install */
 
+/* The extension discovers hooks by exact file name (hook-factory.ts):
+   Windows  -> "<HookName>.ps1" only
+   Unix     -> the extensionless "<HookName>" only, and it must be executable
+   Nothing else is looked at, ever. */
+test("the extension hook file name matches Cline's discovery rule", () => {
+  assert.equal(install.extensionHookFile("pretooluse", "win32"), "PreToolUse.ps1");
+  assert.equal(install.extensionHookFile("pretooluse", "linux"), "PreToolUse");
+  assert.equal(install.extensionHookFile("precompact", "darwin"), "PreCompact");
+  assert.equal(install.extensionHookFile("taskresume", "win32"), "TaskResume.ps1");
+
+  // The wrong platform's file is intentionally ignored by Cline, so shipping the
+  // other one is the same as shipping nothing.
+  const win = install.workspacePlan(path.join(dir, "plat-win"), { platform: "win32" });
+  const unix = install.workspacePlan(path.join(dir, "plat-unix"), { platform: "linux" });
+  assert.ok(win.every((i) => !i.file.includes(".clinerules") || i.file.endsWith(".ps1") || i.file.endsWith(".md")));
+  assert.ok(unix.every((i) => !i.file.includes(".clinerules") || !i.file.endsWith(".ps1")));
+});
+
+test("Unix hook files are marked executable", () => {
+  const unix = install.workspacePlan(path.join(dir, "exec"), { platform: "linux" });
+  const extHook = unix.find((i) => i.file.endsWith(path.join(".clinerules", "hooks", "PreToolUse")));
+  assert.ok(extHook, "expected the extensionless unix hook");
+  assert.equal(extHook.executable, true, "Cline checks fs.constants.X_OK; a non-executable hook is skipped");
+});
+
+test("a global install uses the canonical hook names, not prefixed ones", () => {
+  const plan = install.globalPlan({ platform: "linux" });
+  const names = plan.filter((i) => i.file.includes("Hooks")).map((i) => path.basename(i.file)).sort();
+  assert.deepEqual(names, ["PostToolUse", "PreCompact", "PreToolUse", "TaskResume"], names.join(", "));
+  assert.ok(plan.some((i) => i.file.endsWith(path.join("Cline", "Rules", "context-budget.md"))));
+});
+
+test("an existing foreign hook in a slot is a conflict, never an overwrite", () => {
+  const root = path.join(dir, "conflict");
+  const hooksDir = path.join(root, ".clinerules", "hooks");
+  fs.mkdirSync(hooksDir, { recursive: true });
+  // A hook the user wrote, sitting in the slot we need.
+  const theirs = path.join(hooksDir, install.extensionHookFile("pretooluse", "linux"));
+  fs.writeFileSync(theirs, "#!/usr/bin/env bash\n# mine, hands off\necho '{}'\n");
+
+  const plan = install.workspacePlan(root, { platform: "linux" });
+  assert.equal(plan.find((i) => i.file === theirs)?.action, "conflict");
+
+  const applied = install.applyPlan(plan, { platform: "linux" });
+  assert.equal(applied.conflicts.length, 1, JSON.stringify(applied.conflicts));
+  assert.equal(fs.readFileSync(theirs, "utf8"), "#!/usr/bin/env bash\n# mine, hands off\necho '{}'\n", "a user hook must survive untouched");
+  assert.ok(applied.written.length > 0, "the rest of the install should still proceed");
+
+  // ...and re-running after the user moves it away succeeds.
+  fs.rmSync(theirs);
+  const second = install.applyPlan(install.workspacePlan(root, { platform: "linux" }), { platform: "linux" });
+  assert.equal(second.conflicts.length, 0);
+  assert.ok(fs.existsSync(theirs));
+});
+
 test("workspacePlan covers both surfaces and every file is marked", () => {
   const root = path.join(dir, "ws");
   fs.mkdirSync(root, { recursive: true });
   const plan = install.workspacePlan(root);
-  assert.equal(plan.length, 17, "4 hook events x 4 launchers + 1 rules file");
-  assert.ok(plan.some((item) => item.file.endsWith(path.join(".clinerules", "hooks", "PreCompact"))));
-  assert.ok(plan.some((item) => item.file.endsWith(path.join(".clinerules", "hooks", "TaskResume"))));
+  assert.equal(plan.length, 9, "1 rules file + 4 hook events x (extension hook + CLI hook)");
   assert.ok(plan.every((item) => item.action === "create"));
   assert.ok(plan.every((item) => item.content.includes(install.MARKER)));
-  assert.ok(plan.some((item) => item.file.endsWith(path.join(".clinerules", "hooks", "PreToolUse"))));
-  assert.ok(plan.some((item) => item.file.endsWith(path.join(".cline", "hooks", "PreToolUse.mjs"))));
+  assert.ok(plan.some((item) => item.file.endsWith(path.join(".clinerules", "hooks", install.extensionHookFile("precompact")))));
+  assert.ok(plan.some((item) => item.file.endsWith(path.join(".cline", "hooks", "PreToolUse.sh"))));
 });
 
 test("applyPlan is idempotent", () => {
   const root = path.join(dir, "ws2");
   fs.mkdirSync(root, { recursive: true });
-  assert.equal(install.applyPlan(install.workspacePlan(root)).written.length, 17);
+  assert.equal(install.applyPlan(install.workspacePlan(root)).written.length, 9);
   assert.equal(install.applyPlan(install.workspacePlan(root)).written.length, 0, "a second run must write nothing");
   assert.ok(install.workspacePlan(root).every((item) => item.action === "unchanged"));
 });
@@ -101,7 +154,7 @@ test("removePlan never deletes a file the user wrote", () => {
   fs.writeFileSync(userHook, "#!/usr/bin/env bash\necho '{}'\n");
 
   const { removed } = install.removePlan(install.workspacePlan(root));
-  assert.equal(removed.length, 17);
+  assert.equal(removed.length, 9);
   assert.ok(fs.existsSync(userHook), "a user-owned hook must survive uninstall");
 });
 
@@ -110,7 +163,7 @@ test("repair rewrites a launcher whose entry path no longer exists", () => {
   fs.mkdirSync(root, { recursive: true });
   install.applyPlan(install.workspacePlan(root));
 
-  const target = path.join(root, ".cline", "hooks", "PreToolUse.mjs");
+  const target = path.join(root, ".cline", "hooks", "PreToolUse.sh");
   const broken = fs
     .readFileSync(target, "utf8")
     .replace(/context-budget:entry=.*/, "context-budget:entry=" + path.join(dir, "gone", "pretooluse.mjs"));

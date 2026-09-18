@@ -226,7 +226,7 @@ head("Hooks · payload abuse");
     cwd: root, encoding: "utf8",
     env: { ...process.env, CONTEXT_BUDGET_DIR: store, CONTEXT_BUDGET_PROJECT: work },
   });
-  const entry = (e) => path.join(work, ".cline", "hooks", `${e}.mjs`);
+  const entry = (e) => path.join(root, "hooks", `${e}.mjs`);
   const run = (e, input, env = {}) => {
     const r = spawnSync(process.execPath, [entry(e)], {
       input, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,

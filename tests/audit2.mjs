@@ -300,7 +300,7 @@ head("Concurrency · parallel writers");
   });
   const runs = Array.from({ length: 8 }, () =>
     new Promise((resolve) => {
-      const p = spawn(process.execPath, [path.join(work, ".cline", "hooks", "PreToolUse.mjs")], {
+      const p = spawn(process.execPath, [path.join(root, "hooks", "pretooluse.mjs")], {
         env: { ...process.env, CONTEXT_BUDGET_DIR: store, CONTEXT_BUDGET_FETCH: "cancel", CONTEXT_BUDGET_MCP_ASSUME: "registered" },
         stdio: ["pipe", "pipe", "pipe"],
       });

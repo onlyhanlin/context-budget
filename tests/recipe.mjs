@@ -14,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const base = fs.mkdtempSync(path.join(os.tmpdir(), "cb-recipe-"));
@@ -96,8 +96,12 @@ check("setup --yes exits 0", applied.status === 0, applied.stderr.slice(0, 300))
 check("verification has no failed line", !/\[ \]/.test(applied.stdout), applied.stdout.slice(applied.stdout.indexOf("Verification"), applied.stdout.indexOf("Verification") + 500));
 check("verification reports passing checks", /\[x\] hook entry exists: precompact/.test(applied.stdout));
 
-for (const hook of ["PreToolUse", "PostToolUse", "PreCompact", "TaskResume"]) {
-  check(`hook written: ${hook}`, fs.existsSync(path.join(project, ".clinerules", "hooks", hook)));
+// The name is not cosmetic: Cline looks for "<HookName>.ps1" on Windows and the
+// extensionless "<HookName>" elsewhere, and ignores the other one entirely.
+const { extensionHookFile, cliHookFile } = await import(pathToFileURL(path.join(root, "hooks", "install.mjs")).href);
+for (const event of ["pretooluse", "posttooluse", "precompact", "taskresume"]) {
+  check(`extension hook written: ${extensionHookFile(event)}`, fs.existsSync(path.join(project, ".clinerules", "hooks", extensionHookFile(event))));
+  check(`CLI hook written: ${cliHookFile(event)}`, fs.existsSync(path.join(project, ".cline", "hooks", cliHookFile(event))));
 }
 check("routing rules written", fs.existsSync(path.join(project, ".clinerules", "context-budget.md")));
 
@@ -142,7 +146,7 @@ check("a no-op run does not spray backups", backupsAfter.length === backups.leng
 step("Uninstall (documented)");
 const removed = cb(["uninstall", "--yes"]);
 check("uninstall exits 0", removed.status === 0, removed.stderr.slice(0, 300));
-check("generated hooks are gone", !fs.existsSync(path.join(project, ".clinerules", "hooks", "PreToolUse")));
+check("generated hooks are gone", !fs.existsSync(path.join(project, ".clinerules", "hooks", extensionHookFile("pretooluse"))));
 const afterUninstall = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
 check("our key is removed from settings", !afterUninstall.mcpServers["context-budget"], JSON.stringify(afterUninstall).slice(0, 200));
 check("the other MCP server is still there", Boolean(afterUninstall.mcpServers["some-other-server"]));
@@ -153,6 +157,39 @@ fs.writeFileSync(userHook, "#!/usr/bin/env bash\necho '{}'\n");
 cb(["setup", "--yes"]);
 cb(["uninstall", "--yes"]);
 check("a user-written hook is never deleted", fs.existsSync(userHook));
+
+/* ---- global install: once, for every project ---- */
+step("Global install (documented)");
+const globalHooks = path.join(fakeHome, "Documents", "Cline", "Hooks");
+const globalRules = path.join(fakeHome, "Documents", "Cline", "Rules");
+
+const globalRun = cb(["setup", "--global", "--yes", "--hooks-only"]);
+check("setup --global exits 0", globalRun.status === 0, globalRun.stderr.slice(0, 300));
+check("global rules land in ~/Documents/Cline/Rules", fs.existsSync(path.join(globalRules, "context-budget.md")));
+check("global hooks land in ~/Documents/Cline/Hooks", fs.existsSync(globalHooks));
+
+const globalNames = fs.existsSync(globalHooks) ? fs.readdirSync(globalHooks).sort() : [];
+for (const event of ["pretooluse", "posttooluse", "precompact", "taskresume"]) {
+  const expected = extensionHookFile(event);
+  check(`global hook uses the canonical name: ${expected}`, globalNames.includes(expected), globalNames.join(", "));
+}
+check("no prefixed-looking hook names were written", !globalNames.some((n) => n.startsWith("context-budget")), globalNames.join(", "));
+
+/* The hook slot belongs to whoever got there first. */
+const theirs = path.join(globalHooks, extensionHookFile("pretooluse"));
+cb(["uninstall", "--global", "--yes"]);
+fs.mkdirSync(globalHooks, { recursive: true });
+const theirsBody = "#!/usr/bin/env bash\n# mine, hands off\necho \"{\"cancel\": false}\"\n";
+fs.writeFileSync(theirs, theirsBody);
+const conflicted = cb(["setup", "--global", "--yes", "--hooks-only"]);
+check("a foreign global hook is reported as a CONFLICT", /CONFLICT/.test(conflicted.stdout), conflicted.stdout.slice(-500));
+check("the foreign global hook is left byte-identical", fs.readFileSync(theirs, "utf8") === theirsBody);
+check("the rest of the global install still proceeded", fs.existsSync(path.join(globalHooks, extensionHookFile("precompact"))));
+
+const globalUninstall = cb(["uninstall", "--global", "--yes"]);
+check("uninstall --global exits 0", globalUninstall.status === 0, globalUninstall.stderr.slice(0, 200));
+check("our global hooks are gone", !fs.existsSync(path.join(globalHooks, extensionHookFile("precompact"))));
+check("the foreign global hook survived uninstall", fs.existsSync(theirs));
 
 const failed = results.filter((r) => !r.ok);
 process.stdout.write(`\n${"=".repeat(60)}\n${results.length - failed.length}/${results.length} README steps verified\n`);
