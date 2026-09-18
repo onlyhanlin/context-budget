@@ -67,9 +67,14 @@ server.stdout.on("data", (chunk) => {
 function rpc(method, params, timeoutMs = 60_000) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    // Clear the timer on settle: a stray 60 s timer otherwise keeps the event
+    // loop alive long after the report has been printed.
+    const timer = setTimeout(() => { if (pending.delete(id)) reject(new Error(`timeout ${method}`)); }, timeoutMs);
+    pending.set(id, {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    });
     server.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    setTimeout(() => { if (pending.delete(id)) reject(new Error(`timeout ${method}`)); }, timeoutMs);
   });
 }
 const call = (name, args) => rpc("tools/call", { name, arguments: args });

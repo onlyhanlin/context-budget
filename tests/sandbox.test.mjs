@@ -283,3 +283,68 @@ test("batch runtime is detected on Windows and exposes filePath for ctx_execute_
   assert.equal(res2.exitCode, 0, res2.stderr);
   assert.ok(res2.stdout.includes("file-content-here"), `stdout was: ${res2.stdout}`);
 });
+
+test("batch round-trips non-ASCII (CRLF conversion regression)", async () => {
+  // cmd.exe on a double-byte codepage (cp936 etc.) mis-parses LF-only batch
+  // files containing non-ASCII: a DBCS lead byte eats the line break and every
+  // later line — even pure ASCII — breaks. The sandbox must write CRLF endings.
+  const resolved = resolveRuntime("batch");
+  if (!resolved) {
+    assert.ok(true, "no batch runtime on this platform — skipping");
+    return;
+  }
+  const res = await run({
+    language: "batch",
+    code: `@echo off\necho hello-world\necho café 你好`,
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.ok(res.stdout.includes("hello-world"), `stdout was: ${res.stdout}`);
+  assert.ok(res.stdout.includes("café 你好"), `stdout was: ${res.stdout}`);
+});
+
+test("batch survives special characters and reports a non-zero exit code", async () => {
+  const resolved = resolveRuntime("batch");
+  if (!resolved) {
+    assert.ok(true, "no batch runtime on this platform — skipping");
+    return;
+  }
+  const res = await run({
+    language: "batch",
+    code: `@echo off\necho a ^& b\necho 100%% done\necho (paren ^| pipe)\nexit /b 3`,
+  });
+  assert.equal(res.exitCode, 3);
+  assert.equal(res.ok, false);
+  assert.ok(res.stdout.includes("a & b"), `stdout was: ${res.stdout}`);
+  assert.ok(res.stdout.includes("100% done"), `stdout was: ${res.stdout}`);
+});
+
+test("batch infinite loop is killed by the timeout", async () => {
+  const resolved = resolveRuntime("batch");
+  if (!resolved) {
+    assert.ok(true, "no batch runtime on this platform — skipping");
+    return;
+  }
+  const res = await run({
+    language: "batch",
+    code: `@echo off\n:cb_forever\ngoto cb_forever`,
+    timeoutMs: 2000,
+  });
+  assert.equal(res.timedOut, true);
+  assert.equal(res.ok, false);
+});
+
+test("batch large output is truncated to the cap but fully counted", async () => {
+  const resolved = resolveRuntime("batch");
+  if (!resolved) {
+    assert.ok(true, "no batch runtime on this platform — skipping");
+    return;
+  }
+  const res = await run({
+    language: "batch",
+    code: `@echo off\nfor /l %%i in (1,1,20000) do echo line-%%i-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+    maxOutputBytes: 4096,
+  });
+  assert.equal(res.truncated, true);
+  assert.ok(res.bytesOut <= 4096 + 64);
+  assert.ok(res.stdoutBytesTotal >= 800000, "the full output volume must be counted for accounting");
+});

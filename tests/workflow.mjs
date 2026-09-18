@@ -60,9 +60,14 @@ child.stdout.on("data", (chunk) => {
 function call(method, params) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    // Clear the timer on settle: a stray 120 s timer otherwise keeps the event
+    // loop alive long after the report has been printed.
+    const timer = setTimeout(() => { if (pending.delete(id)) reject(new Error(`timeout: ${method}`)); }, 120_000);
+    pending.set(id, {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    setTimeout(() => { if (pending.delete(id)) reject(new Error(`timeout: ${method}`)); }, 120_000);
   });
 }
 const notify = (method, params) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");

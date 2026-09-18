@@ -52,9 +52,14 @@ function startServer(workdir, storeDir) {
   const rpc = (method, params, ms = 90_000) => {
     const reqId = id++;
     return new Promise((resolve, reject) => {
-      pending.set(reqId, { resolve, reject });
+      // Clear the timer on settle: a stray 90 s timer otherwise keeps the event
+      // loop alive long after the report has been printed.
+      const timer = setTimeout(() => { if (pending.delete(reqId)) reject(new Error(`timeout ${method}`)); }, ms);
+      pending.set(reqId, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: reqId, method, params }) + "\n");
-      setTimeout(() => { if (pending.delete(reqId)) reject(new Error(`timeout ${method}`)); }, ms);
     });
   };
   return {

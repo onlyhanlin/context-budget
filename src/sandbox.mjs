@@ -242,6 +242,13 @@ const RUNTIMES = {
     // that returns exit code 0 across cmd.exe implementations).
     probeArgs: ["/d", "/c", "exit 0"],
     args: (file) => ["/d", "/c", file],
+    // cmd.exe's batch parser is DBCS-aware: on a double-byte system codepage
+    // (e.g. cp936) a lead byte followed by a bare LF eats the line break, and
+    // EVERY later line — even pure ASCII — is parsed wrong. CRLF endings make
+    // the whole class of corruption disappear (verified on cp936: with LF,
+    // `echo hello-world` after a line containing 你好 fails with "'hello-world'
+    // is not recognized"; with CRLF, non-ASCII passes through byte-for-byte).
+    crlf: true,
     // Batch has no multiline string variable, so `content` cannot be bound the
     // way the other runtimes bind it. Expose `filePath` instead; the script can
     // `type "%filePath%"` when it needs the file. `if not ...==""` (rather than
@@ -375,7 +382,9 @@ export async function run({
   const preamble = spec.preamble && (spec.instrumented || filePath) ? spec.preamble(extraEnv) : "";
   const body = preamble + String(code ?? "");
   const source = spec.instrumented ? rewriteInstrumentedSpecifiers(body) : body;
-  fs.writeFileSync(file, source, "utf8");
+  // Runtimes flagged `crlf` must be written with Windows line endings; see the
+  // comment on the batch runtime for why this is correctness, not cosmetics.
+  fs.writeFileSync(file, spec.crlf ? source.replace(/\r\n|\r|\n/g, "\r\n") : source, "utf8");
 
   if (spec.instrumented) {
     for (const [name, content] of Object.entries(INSTRUMENT_FILES)) {
