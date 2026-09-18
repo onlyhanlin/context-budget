@@ -46,7 +46,14 @@ function countByAction(files) {
 export function formatPlan(plan) {
   const lines = [];
   lines.push(`context-budget setup — ${plan.global ? "global" : "workspace"} install`);
-  lines.push(`workspace: ${plan.root}`);
+  if (plan.global) {
+    // Printing a "workspace" line here implies the working directory matters.
+    // It does not: a global install only ever touches ~/Documents/Cline and the
+    // editor's own settings, so it can be run from anywhere.
+    lines.push("scope:   every workspace (this does not depend on the current directory)");
+  } else {
+    lines.push(`workspace: ${plan.root}`);
+  }
   lines.push("");
   lines.push("Cline installs detected");
   lines.push(...describeTargets(plan.targets));

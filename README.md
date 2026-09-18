@@ -77,35 +77,61 @@ If `context-budget` is not found, `npm link` did not write to a directory on
 PATH. Either fix the npm prefix, or skip the link and use the absolute path form
 in [Configuring the MCP server by hand](#3-configuring-the-mcp-server-by-hand).
 
-### Step 2 — look before you write
+### Step 2 — choose the scope, then dry run
 
-Run the dry run **from the user's project directory** and read the output:
+There are two scopes. Decide first, because it determines whether you need to
+`cd` anywhere at all.
+
+| | Global (prefer this) | This project |
+|---|---|---|
+| Command | `context-budget setup --global` | `cd <project>` then `context-budget setup` |
+| Routing rules | `~/Documents/Cline/Rules/context-budget.md` | `<project>/.clinerules/context-budget.md` |
+| Hooks | `~/Documents/Cline/Hooks/` | `<project>/.clinerules/hooks/` and `<project>/.cline/hooks/` |
+| Applies to | every workspace, immediately | that one workspace |
+| Re-run per project | no | yes |
+
+**Pick global unless the user asked for this repository specifically.** It is
+less work for them: one install, every project.
+
+The MCP server is registered globally under **both** scopes, because it lives
+in the editor settings file rather than in the project. The scope only decides
+where the routing rules and the hook files go.
+
+A global dry run needs no `cd` — nothing in it reads the working directory:
+
+```bash
+context-budget setup --global        # run this from anywhere
+```
+
+Only the project-scoped form cares where you are:
 
 ```bash
 cd /path/to/the/users/project
 context-budget setup
 ```
 
-It prints:
+Either way it prints:
 
 - every Cline installation it found, and whether `context-budget` is registered in each
 - the hook and rules files it would create, update, or leave alone
 - the exact MCP config block it would merge
 
-A file that says `update` instead of `create` already existed. **If it is a
-hook the user wrote themselves, stop and ask before overwriting it.**
+`update` instead of `create` means the file already existed. `CONFLICT` means the
+user wrote their own hook in a slot we need — **stop and ask before touching it.**
 
 ### Step 3 — apply
 
+Use the same scope you just dry-ran. Do not mix them in one instruction.
+
 ```bash
-context-budget setup --yes              # this project only
 context-budget setup --global --yes     # every project, installed once
 ```
 
-**Choose one.** The MCP server is registered globally in both cases — it lives
-in Cline's settings file, not in the project. The flag only decides where the
-routing rules and hook files go. Prefer `--global` when the user has not asked
-for a project-scoped install, because it means never running `setup` again.
+or, having already cd-ed into the repository:
+
+```bash
+context-budget setup --yes              # this project only
+```
 
 This writes only files it owns (each carries a `context-budget:generated`
 marker), merges exactly one key into each `cline_mcp_settings.json`, and takes a

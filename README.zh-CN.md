@@ -72,34 +72,58 @@ context-budget version
 如果提示找不到 `context-budget`，说明 `npm link` 没写到 PATH 里。要么修 npm
 prefix，要么跳过 link，改用下面「手工配置」里的绝对路径写法。
 
-### 第 2 步 —— 写之前先看
+### 第 2 步 —— 先选范围，再 dry run
 
-**在用户的项目目录里**跑 dry run，并读输出：
+有两种范围。**先决定**，因为它决定了你到底需不需要 `cd`。
+
+| | 全局（优先） | 当前项目 |
+|---|---|---|
+| 命令 | `context-budget setup --global` | 先 `cd <项目>` 再 `context-budget setup` |
+| 路由规则 | `~/Documents/Cline/Rules/context-budget.md` | `<项目>/.clinerules/context-budget.md` |
+| 钩子 | `~/Documents/Cline/Hooks/` | `<项目>/.clinerules/hooks/` 和 `<项目>/.cline/hooks/` |
+| 生效范围 | 所有工作区，立即 | 那一个工作区 |
+| 每个项目都要再跑 | 不用 | 要 |
+
+**用户没明确说"就这个仓库"时，选全局。** 对用户来说省事：装一次，处处生效。
+
+两种范围下 **MCP server 都是全局注册的**——它在编辑器的配置文件里，不在项目里。
+范围只决定路由规则和钩子文件写到哪里。
+
+**全局 dry run 不需要 `cd`**，它完全不读当前目录：
+
+```bash
+context-budget setup --global        # 在任何目录都能跑
+```
+
+只有按项目安装才关心你在哪：
 
 ```bash
 cd /path/to/the/users/project
 context-budget setup
 ```
 
-它会打印：
+两种都会打印：
 
 - 找到的每一处 Cline 安装，以及 `context-budget` 在其中是否已注册
 - 将要创建 / 更新 / 保持不动的钩子和规则文件
 - 将要合并进去的那段 MCP 配置
 
-某个文件显示 `update` 而不是 `create`，说明它本来就存在。**如果是用户自己写的
-钩子，停下问清楚再覆盖。**
+显示 `update` 而不是 `create`，说明文件本来就存在。显示 `CONFLICT`，说明用户
+在我们需要的槽位里写了自己的钩子——**停下问清楚，别动它。**
 
 ### 第 3 步 —— 执行
 
+用你刚才 dry run 的那个范围，**不要在一条指令里混用两种**。
+
 ```bash
-context-budget setup --yes              # 只装当前项目
 context-budget setup --global --yes     # 装一次，所有项目生效
 ```
 
-**二选一。** 两种方式下 **MCP server 都是全局注册的**——它在 Cline 的配置文件里，
-不在项目里。这个参数只决定路由规则和钩子文件写到哪里。**用户没特别要求按项目安装时，
-优先用 `--global`**，因为那样以后都不用再跑 `setup`。
+或者，已经 `cd` 进仓库之后：
+
+```bash
+context-budget setup --yes              # 只装当前项目
+```
 
 它只写自己拥有的文件（每个都带 `context-budget:generated` 标记），往每个
 `cline_mcp_settings.json` 里只合并一个键，并且在改动前落一个带时间戳的
