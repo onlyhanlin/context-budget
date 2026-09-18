@@ -8,7 +8,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
+import { openDatabase } from "./sqlite-util.mjs";
 import { kbPath, limits, storageRoot } from "./config.mjs";
 import { tokenizeForIndex, termsOf, buildMatchQuery, extractSnippet, estimateTokens } from "./text.mjs";
 
@@ -64,35 +64,42 @@ CREATE TABLE IF NOT EXISTS snapshots (
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
 `;
 
-const require = createRequire(import.meta.url);
-
-/**
- * node:sqlite is loaded lazily. Importing it eagerly makes every command emit
- * Node's ExperimentalWarning, including ones that never touch the database.
- */
-function sqlite() {
-  return require("node:sqlite").DatabaseSync;
-}
-
 let db = null;
 let dbFile = null;
+let dbWarnings = [];
 
 export function open() {
-  const DatabaseSync = sqlite();
   const file = kbPath();
   if (db && dbFile === file) return db;
   if (db) { try { db.close(); } catch { /* ignore */ } }
-  db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA synchronous = NORMAL;");
-  // The same knowledge base is written by the MCP server AND by the PreCompact
-  // hook, and a user can have two Cline windows open on one project. Without a
-  // busy timeout the losing writer gets SQLITE_BUSY and its write disappears.
-  db.exec("PRAGMA busy_timeout = 5000;");
+  const opened = openDatabase(file);
+  db = opened.db;
+  dbWarnings = opened.warnings;
+  syncPragmas(db);
   db.exec(SCHEMA);
   dbFile = file;
   gc(db);
   return db;
+}
+
+/** Pragmas that are safe to lose; failures are recorded, never thrown. */
+function syncPragmas(handle) {
+  try { handle.exec("PRAGMA synchronous = NORMAL;"); } catch { /* non-fatal */ }
+}
+
+/** Non-fatal storage problems, surfaced by \`context-budget doctor\`. */
+export function warnings() {
+  return [...dbWarnings];
+}
+
+/** Whether the knowledge base can actually be queried right now. */
+export function healthy() {
+  try {
+    open().prepare("SELECT COUNT(*) AS n FROM chunks").get();
+    return { ok: true, warnings: dbWarnings };
+  } catch (error) {
+    return { ok: false, error: error.message, warnings: dbWarnings };
+  }
 }
 
 export function kbFile() {

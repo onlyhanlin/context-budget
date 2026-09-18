@@ -415,9 +415,21 @@ export async function ctxDoctor() {
   lines.push("", "storage");
   lines.push(`  [${sqliteOk ? "x" : " "}] node:sqlite +${ftsOk ? " FTS5" : ""}${sqliteError ? ` — ${sqliteError}` : ""}`);
   lines.push(`  [x] root      ${storageRoot()}`);
-  lines.push(`  [x] knowledge ${kbPath()}`);
-  lines.push(`  [x] stats     ${stats.summary().statsFile}`);
   lines.push(`  [x] workspace ${projectRoot()}`);
+
+  // A diagnostic command must survive the very breakage it is meant to report,
+  // so the two databases are probed defensively rather than opened blind.
+  const knowledge = store.healthy();
+  lines.push(
+    `  [${knowledge.ok ? "x" : " "}] knowledge ${kbPath()}${knowledge.ok ? "" : ` — ${knowledge.error}`}`
+  );
+  for (const warning of knowledge.warnings ?? []) lines.push(`      ! ${warning}`);
+
+  const ledger = stats.health();
+  lines.push(
+    `  [${ledger.ok ? "x" : " "}] ledger    ${ledger.file}${ledger.ok ? "" : ` — ${ledger.error}`}`
+  );
+  for (const warning of ledger.warnings ?? []) lines.push(`      ! ${warning}`);
   lines.push("", "cline");
   const targets = discoverClineTargets();
   if (!targets.length) {

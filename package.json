@@ -26,7 +26,9 @@
     "test:audit": "node tests/audit.mjs",
     "test:audit2": "node tests/audit2.mjs",
     "test:audit3": "node tests/audit3.mjs",
-    "test:all": "npm test && npm run test:e2e && npm run test:scenario && npm run test:workflow && npm run test:audit && npm run test:audit2 && npm run test:audit3",
+    "test:docs": "node --disable-warning=ExperimentalWarning --test \"tests/docs.test.mjs\"",
+    "test:recipe": "node tests/recipe.mjs",
+    "test:all": "npm test && npm run test:e2e && npm run test:scenario && npm run test:workflow && npm run test:audit && npm run test:audit2 && npm run test:audit3 && npm run test:recipe",
     "bench": "node --disable-warning=ExperimentalWarning bench/ab-compare.mjs"
   },
   "dependencies": {

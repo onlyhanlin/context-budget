@@ -21,14 +21,32 @@ function jsonBlockAfter(text, marker) {
 
 const expected = { mcpServers: { [SERVER_NAME]: serverEntry() } };
 
+// Anchor on the HEADING, not on any mention of it: the phrase also appears in
+// links and in prose, and an earlier example JSON block would be picked up first.
+const EN_HEADING = "### 3. Configuring the MCP server by hand";
+const ZH_HEADING = "### 3. 手工配置 MCP server";
+
 test("README.md documents the exact MCP config the installer writes", () => {
   const text = fs.readFileSync(path.join(root, "README.md"), "utf8");
-  assert.deepEqual(jsonBlockAfter(text, "Configuring the MCP server by hand"), expected);
+  assert.deepEqual(jsonBlockAfter(text, EN_HEADING), expected);
 });
 
 test("README.zh-CN.md documents the exact MCP config the installer writes", () => {
   const text = fs.readFileSync(path.join(root, "README.zh-CN.md"), "utf8");
-  assert.deepEqual(jsonBlockAfter(text, "手工配置 MCP server"), expected);
+  assert.deepEqual(jsonBlockAfter(text, ZH_HEADING), expected);
+});
+
+test("internal links to the manual-config section resolve to a real heading", () => {
+  // A link that points at a slug no heading produces is a link that goes nowhere.
+  const cases = [
+    ["README.md", EN_HEADING, "#3-configuring-the-mcp-server-by-hand"],
+    ["README.zh-CN.md", ZH_HEADING, "#3-手工配置-mcp-server"],
+  ];
+  for (const [file, heading, anchor] of cases) {
+    const text = fs.readFileSync(path.join(root, file), "utf8");
+    assert.ok(text.includes(heading), `${file} is missing the heading: ${heading}`);
+    assert.ok(text.includes(`](${anchor})`), `${file} has no link using ${anchor}`);
+  }
 });
 
 test("both READMEs list every auto-approved tool by name", () => {

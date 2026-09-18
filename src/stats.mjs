@@ -5,8 +5,7 @@
  * that "does this actually pay for itself?" is a measurement rather than an
  * argument.
  */
-import { createRequire } from "node:module";
-import path from "node:path";
+import { openDatabase } from "./sqlite-util.mjs";
 import { statsPath, projectKey, storageRoot } from "./config.mjs";
 import { estimateTokens } from "./text.mjs";
 
@@ -31,23 +30,34 @@ CREATE INDEX IF NOT EXISTS idx_calls_project ON calls(project);
 
 const SESSION_ID = process.env.CONTEXT_BUDGET_SESSION || `${Date.now().toString(36)}-${process.pid}`;
 
-const require = createRequire(import.meta.url);
-
-/** Lazy so unrelated commands do not emit Node's ExperimentalWarning. */
-function sqlite() {
-  return require("node:sqlite").DatabaseSync;
-}
-
 let db = null;
+let dbWarnings = [];
 
 function open() {
   if (db) return db;
-  const DatabaseSync = sqlite();
-  db = new DatabaseSync(statsPath());
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA busy_timeout = 5000;");
+  const opened = openDatabase(statsPath());
+  db = opened.db;
+  dbWarnings = opened.warnings;
   db.exec(SCHEMA);
   return db;
+}
+
+/** Non-fatal storage problems, surfaced by the doctor command. */
+export function warnings() {
+  return [...dbWarnings];
+}
+
+/**
+ * Never throws. `doctor` calls this to report on the ledger, and a diagnostic
+ * command that dies on a broken ledger is useless exactly when it is needed.
+ */
+export function health() {
+  try {
+    open().prepare("SELECT COUNT(*) AS n FROM calls").get();
+    return { ok: true, file: statsPath(), warnings: dbWarnings };
+  } catch (error) {
+    return { ok: false, file: statsPath(), error: error.message, warnings: dbWarnings };
+  }
 }
 
 export function sessionId() {

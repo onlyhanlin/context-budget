@@ -121,17 +121,56 @@ export async function verify(plan) {
   const checks = [];
   const { decidePreToolUse, decidePostToolUse } = await import("../hooks/run.mjs");
 
-  const redirect = await decidePreToolUse({
-    hookName: "tool_call",
-    tool_call: { name: "fetch_web_content", input: { url: "https://example.com" } },
+  // Exercise the payload shape the VS Code extension actually sends, and assert
+  // the current output contract. Earlier revisions of this function checked an
+  // SDK-shaped payload and the retired `context` field, so a perfectly healthy
+  // install was reported as three failures.
+  const event = (toolName, parameters) => ({ hookName: "PreToolUse", preToolUse: { toolName, parameters } });
+  const surfaced = (decision) => decision.cancel === false && typeof decision.contextModification === "string";
+
+  const fetch = await decidePreToolUse(event("fetch_web_content", { url: "https://example.com" }));
+  checks.push({
+    name: "a page fetch is surfaced to the model",
+    ok: surfaced(fetch),
+    detail: JSON.stringify(fetch).slice(0, 140),
   });
-  checks.push({ name: "PreToolUse redirects page fetches", ok: redirect.cancel === true, detail: JSON.stringify(redirect).slice(0, 120) });
 
-  const untouched = await decidePreToolUse({ tool_call: { name: "editor", input: { path: "a.ts" } } });
-  checks.push({ name: "PreToolUse leaves the editor alone", ok: Object.keys(untouched).length === 0, detail: JSON.stringify(untouched) });
+  const editor = await decidePreToolUse(event("editor", { path: "a.ts" }));
+  checks.push({
+    name: "the editor tool is never interrupted",
+    ok: editor.cancel === false && editor.contextModification === undefined,
+    detail: JSON.stringify(editor),
+  });
 
-  const big = await decidePostToolUse({ tool_result: { name: "read_files", output: "x".repeat(50_000) } });
-  checks.push({ name: "PostToolUse nudges oversized results", ok: typeof big.context === "string" });
+  const noisy = await decidePreToolUse(event("execute_command", { command: "npm test" }));
+  checks.push({
+    name: "a noisy command is nudged toward ctx_batch",
+    ok: surfaced(noisy) && noisy.contextModification.includes("ctx_batch"),
+    detail: JSON.stringify(noisy).slice(0, 140),
+  });
+
+  const bigResult = await decidePostToolUse({
+    hookName: "PostToolUse",
+    postToolUse: { toolName: "read_files", result: "x".repeat(50_000), success: true },
+  });
+  checks.push({ name: "PostToolUse nudges an oversized tool result", ok: surfaced(bigResult), detail: JSON.stringify(bigResult).slice(0, 140) });
+
+  // Cancel mode is opt-in, so it is verified with the switch actually thrown.
+  const savedFetch = process.env.CONTEXT_BUDGET_FETCH;
+  const savedAssume = process.env.CONTEXT_BUDGET_MCP_ASSUME;
+  process.env.CONTEXT_BUDGET_FETCH = "cancel";
+  process.env.CONTEXT_BUDGET_MCP_ASSUME = "registered";
+  try {
+    const armed = await decidePreToolUse(event("fetch_web_content", { url: "https://example.com/armed-check" }));
+    checks.push({
+      name: "CONTEXT_BUDGET_FETCH=cancel really blocks the fetch",
+      ok: armed.cancel === true && typeof armed.errorMessage === "string",
+      detail: JSON.stringify(armed).slice(0, 140),
+    });
+  } finally {
+    if (savedFetch === undefined) delete process.env.CONTEXT_BUDGET_FETCH; else process.env.CONTEXT_BUDGET_FETCH = savedFetch;
+    if (savedAssume === undefined) delete process.env.CONTEXT_BUDGET_MCP_ASSUME; else process.env.CONTEXT_BUDGET_MCP_ASSUME = savedAssume;
+  }
 
   for (const [event, file] of Object.entries(ENTRY)) {
     checks.push({ name: `hook entry exists: ${event}`, ok: fs.existsSync(file), detail: file });

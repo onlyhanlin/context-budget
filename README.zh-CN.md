@@ -3,20 +3,169 @@
 **只把答案倒进上下文，原料留在瓶底。**
 
 工具输出才是撑爆上下文窗口的元凶。一个 50 KB 的文件大约 1.3 万 token，而且
-一旦进入对话，之后**每一轮请求都要重发**，直到被压缩掉。这个项目把分析工作搬进
-沙箱，并用索引代替对话记录。
+一旦进入对话，之后**每一轮请求都要重发**。context-budget 把分析搬进沙箱，
+用索引代替对话记录。
 
-支持 **Cline**（扩展 + CLI）以及任何 MCP 客户端。
+一个 MCP server + 一组 Cline 钩子。任何 MCP 客户端都能用；钩子部分针对 Cline。
 
 ---
 
-## 它到底做什么
+## 快速开始
+
+```bash
+# 1. 拿到 CLI（还没发到 npm，从仓库装）
+git clone https://github.com/onlyhanlin/context-budget.git
+cd context-budget && npm install && npm link
+
+# 2. 装进你的项目 —— 先 DRY RUN，它什么都不会写
+cd /path/to/your/project
+context-budget setup          # 只显示将要做的改动
+context-budget setup --yes    # 执行：钩子 + 规则 + 注册 MCP
+
+# 3. 自检
+context-budget doctor
+```
+
+然后做那件谁都替你做不了的事：
+
+> **Cline → Settings → Features → 勾选 "Enable Hooks"**，然后重启 Cline。
+
+安装就这些。不想跑安装程序，看
+[手工配置 MCP server](#3-手工配置-mcp-server)。
+
+---
+
+## 如果你是 AI agent，按这个执行
+
+这一节是**用来执行的，不是用来读的**。从上往下走，看到 STOP 就停。
+
+### 第 0 步 —— 检查前置条件
+
+```bash
+node --version      # 必须 >= 22.5（知识库用的是内置 node:sqlite + FTS5）
+```
+
+Node 低于 22.5 就**停下告诉用户**，没有绕过的办法。
+
+### 第 1 步 —— 安装 CLI
+
+```bash
+git clone https://github.com/onlyhanlin/context-budget.git /tmp/context-budget
+cd /tmp/context-budget
+npm install
+npm link
+```
+
+验证——必须打印 `0.1.0`（或更高）：
+
+```bash
+context-budget version
+```
+
+如果提示找不到 `context-budget`，说明 `npm link` 没写到 PATH 里。要么修 npm
+prefix，要么跳过 link，改用下面「手工配置」里的绝对路径写法。
+
+### 第 2 步 —— 写之前先看
+
+**在用户的项目目录里**跑 dry run，并读输出：
+
+```bash
+cd /path/to/the/users/project
+context-budget setup
+```
+
+它会打印：
+
+- 找到的每一处 Cline 安装，以及 `context-budget` 在其中是否已注册
+- 将要创建 / 更新 / 保持不动的钩子和规则文件
+- 将要合并进去的那段 MCP 配置
+
+某个文件显示 `update` 而不是 `create`，说明它本来就存在。**如果是用户自己写的
+钩子，停下问清楚再覆盖。**
+
+### 第 3 步 —— 执行
+
+```bash
+context-budget setup --yes
+```
+
+它只写自己拥有的文件（每个都带 `context-budget:generated` 标记），往每个
+`cline_mcp_settings.json` 里只合并一个键，并且在改动前落一个带时间戳的
+`.backup-…` 备份。
+
+应该会看到自检块，全行必须是 `[x]`：
+
+```
+Verification
+  [x] a page fetch is surfaced to the model
+  [x] the editor tool is never interrupted
+  [x] a noisy command is nudged toward ctx_batch
+  [x] PostToolUse nudges an oversized tool result
+  [x] CONTEXT_BUDGET_FETCH=cancel really blocks the fetch
+  [x] hook entry exists: pretooluse
+  ...
+```
+
+出现 `[ ]` 就**原样报给用户，停下**。不要自己去改生成的文件。
+
+### 第 4 步 —— STOP。请用户去开钩子
+
+这一步你做不到。用用户的语言告诉他：
+
+> 请打开 **Cline → Settings → Features**，勾选 **"Enable Hooks"**，然后重启 Cline。
+
+不开这个开关，钩子文件躺在磁盘上但永不触发。效果从"强制"退回"劝说"——大约
+98% 掉到 60%。**其它功能照常工作**，只是沙箱工具不再被自动使用。
+
+### 第 5 步 —— 不等 agent，直接验证
+
+```bash
+echo '{"hookName":"PreToolUse","preToolUse":{"toolName":"fetch_web_content","parameters":{"url":"https://example.com"}}}' | context-budget hook pretooluse
+```
+
+预期——`contextModification` 非空：
+
+```json
+{"cancel":false,"contextModification":"Page fetches are better routed through the sandbox: ...","context":"..."}
+```
+
+如果只输出 `{"cancel":false}` 而没有 `contextModification`，说明钩子跑了但判定
+无事可做——对这个载荷来说不对。
+
+### 第 6 步 —— 确认工具可达
+
+```bash
+context-budget doctor
+```
+
+看 `cline` 那一段。用户正在用的编辑器必须显示 `mcp: registered`。显示
+`NOT registered` 就重跑 `context-budget setup --yes`；还不行就按
+[手工配置 MCP server](#3-手工配置-mcp-server) 通过 Cline 面板加进去。
+
+### 出问题怎么办
+
+| 症状 | 处理 |
+|---|---|
+| `context-budget: command not found` | 回到第 1 步。或改用绝对路径形式的 MCP 配置。 |
+| doctor 里 `[ ] node:sqlite + FTS5` | Node 低于 22.5。停。 |
+| doctor 里 `[ ] knowledge` / `[ ] ledger` | 存储根目录不可写。把 `CONTEXT_BUDGET_DIR` 指到可写路径再跑。 |
+| `mcp: NOT registered` | 重跑 `context-budget setup --yes`，或手工注册。 |
+| 钩子从不触发 | "Enable Hooks" 没开；或者 CLI 在 `--yolo` 模式（该模式按设计禁用钩子）。 |
+| 对话里没有 `ctx_*` 工具 | MCP 没注册，或 Cline 没重启。 |
+| 本来好好的，突然不灵了 | 包被移动了。`context-budget doctor --fix`。 |
+
+**回滚**：`context-budget uninstall --yes` 只删除带标记的文件，并且只从
+`mcpServers` 里移除 `context-budget` 一个键，同样带备份。
+
+---
+
+## 它做什么
 
 | 层 | 工具 | 效果 |
 |---|---|---|
 | **沙箱** | `ctx_execute` `ctx_execute_file` `ctx_batch` | 子进程里跑分析，**只有 stdout 回来**。文件内容、日志、HTML 从不进入对话。 |
 | **索引** | `ctx_index` `ctx_search` | 文档和命令输出切块存进 SQLite **FTS5**，之后再查，而不是现在粘进来。 |
-| **强制** | Cline hooks | `PreToolUse` 在调用发生前重定向网页抓取、提醒超大读取。这是 ~60% 和 ~98% 效果的差别。 |
+| **强制** | Cline 钩子 | `PreToolUse` 在调用发生前重定向网页抓取、提醒超大读取。这是 ~60% 和 ~98% 效果的差别。 |
 | **连续性** | `PreCompact` + `TaskResume` | 压缩前抓取一张 ≤2 KB 工作状态卡，压缩后交回，让被压缩或恢复的任务不会从"我们刚才在干嘛"重新开始。 |
 | **度量** | `ctx_stats` | 每次调用都记录有多少字节留在了沙箱里。是测出来的，不是吹出来的。 |
 
@@ -39,25 +188,35 @@ B. ctx_execute（一个脚本，只回 stdout）
 
 ---
 
-## 环境要求
+## 安装（详细版）
 
-- **Node.js ≥ 22.5** —— 知识库用的是内置 `node:sqlite` + FTS5，**无需原生编译**，
+### 环境要求
+
+- **Node.js ≥ 22.5。** 知识库用内置 `node:sqlite` + FTS5，**无需原生编译**，
   不需要 `better-sqlite3`。
-- Python / bash / PowerShell 可选，`context-budget doctor` 会告诉你装了哪些。
+- Cline。**扩展**能通过钩子拿到自动路由；任何 MCP 客户端都能拿到工具，但没有钩子。
+- Python / bash / PowerShell 是 `ctx_execute` 的可选运行时，`context-budget doctor`
+  会报告装了哪些。
 
----
-
-## 安装
+### 1. 拿到 CLI
 
 ```bash
-npm install -g context-budget
+git clone https://github.com/onlyhanlin/context-budget.git
+cd context-budget
+npm install
+npm link
 ```
 
-### 跑安装程序
+`npm link` 会把 `context-budget` 放进 PATH。不做的话，下面所有命令都用
+`node /path/to/context-budget/bin/cli.mjs` 代替。
+
+将来会发到 npm，目前仓库是唯一来源。
+
+### 2. 跑安装程序
 
 ```bash
 cd /path/to/your/project
-context-budget setup          # 默认是 DRY RUN，只打印将要做的改动
+context-budget setup          # 默认 DRY RUN，只打印将要做的改动
 context-budget setup --yes    # 真正执行
 ```
 
@@ -90,16 +249,19 @@ MCP server registration
   update    Code · saoudrizwan.claude-dev → …/settings/cline_mcp_settings.json
             1 other server(s) preserved: mcp-filesystem
 
+MCP server config (what setup writes; paste it by hand if your file was not detected):
+{ "mcpServers": { "context-budget": { ... } } }
+
 DRY RUN — nothing was written. Re-run with --yes to apply.
 ```
 
 ```bash
-context-budget setup --global      # 全局规则 + hooks，对所有工作区生效
-context-budget setup --hooks-only  # 只装 hook，不注册 MCP
-context-budget setup --mcp-only    # 只注册 MCP，不装 hook
+context-budget setup --global      # 全局规则 + 钩子，对所有工作区生效
+context-budget setup --hooks-only  # 只装钩子，不注册 MCP
+context-budget setup --mcp-only    # 只注册 MCP，不装钩子
 ```
 
-### 手工配置 MCP server
+### 3. 手工配置 MCP server
 
 `setup` 会自动写入。下面这段是给它**写不了**的情况准备的——探测不到的编辑器、
 便携版安装、被锁住不能改的配置文件、或者**根本不是 Cline** 的 MCP 客户端。
@@ -156,29 +318,29 @@ context-budget setup --mcp-only    # 只注册 MCP，不装 hook
 用 `context-budget doctor` 验证——它会列出找到的每一处 Cline 安装，以及
 `context-budget` 在其中是否已注册。
 
-### 然后做它替你做不了的那一步
+### 4. 在 Cline 里打开钩子
 
-**Cline → Settings → Features → 勾选 "Enable Hooks"。**
+> **Cline → Settings → Features → 勾选 "Enable Hooks"**，然后重启 Cline。
 
-不开这个开关，hook 文件存在但永不触发，效果就从"强制"退回"劝说"——
-大约 98% 和 60% 的差别。
+不开这个开关，钩子文件存在但永不触发，效果就从"强制"退回"劝说"——大约 98%
+和 60% 的差别。**CLI 用户注意**：文件钩子在 `--yolo` 模式下按设计被禁用，
+请用 `--act` 或 `--plan`。
 
-### 验证
+### 5. 验证
 
 ```bash
-context-budget doctor          # 运行时、存储、检测到的 Cline 安装、hook 自检
+context-budget doctor          # 运行时、存储、检测到的 Cline 安装、钩子自检
 context-budget doctor --fix    # 修复因包移动而失效的启动器
 ```
 
-想不等 agent 触发就确认 hook 真的会跑：
+想不等 agent 触发就确认钩子真的会跑：
 
 ```bash
-echo '{"tool_call":{"name":"fetch_web_content","input":{"url":"https://example.com"}}}' \
-  | node "$(npm root -g)/context-budget/hooks/pretooluse.mjs"
-# → {"cancel":true,"errorMessage":"redirected to ctx_execute — ..."}
+echo '{"hookName":"PreToolUse","preToolUse":{"toolName":"fetch_web_content","parameters":{"url":"https://example.com"}}}' | context-budget hook pretooluse
+# → {"cancel":false,"contextModification":"Page fetches are better routed through the sandbox: ..."}
 ```
 
-### 卸载
+### 6. 卸载
 
 ```bash
 context-budget uninstall          # 先说明会删什么
@@ -186,7 +348,7 @@ context-budget uninstall --yes    # 精确回滚 setup 做过的事
 ```
 
 每个生成的文件都带 `context-budget:generated` 标记。卸载**只删带标记的文件**——
-你自己在同一个目录里写的 `PreToolUse` hook 会被原样保留——并且只从
+你自己在同一个目录里写的 `PreToolUse` 钩子会被原样保留——并且只从
 `mcpServers` 里移除 `context-budget` 这一个键，同样带备份。
 
 ---
@@ -201,7 +363,7 @@ context-budget uninstall --yes    # 精确回滚 setup 做过的事
 | `ctx_index(source, content)` | 把文档存起来，而不是粘进来。 |
 | `ctx_search(queries, source?)` | 检索已索引的一切。把所有问题打包成一个数组。 |
 | `ctx_stats(session?)` | 按工具统计省下的字节和 token。 |
-| `ctx_doctor()` | 运行时、FTS5、存储路径自检。 |
+| `ctx_doctor()` | 运行时、FTS5、存储路径、检测到的 Cline 安装。 |
 
 ### 什么时候**不该**用沙箱
 
@@ -209,27 +371,6 @@ context-budget uninstall --yes    # 精确回滚 setup 做过的事
 - **输出很短而且你已知**（`pwd`、干净的 `git status`）→ 直接跑，沙箱只是多一层开销。
 - **命令会改变状态**（`git commit`、`npm install`）→ 用原生工具。沙箱内的写入会被丢弃。
 - **你需要浏览器交互**而不是抓取页面 → 用原生浏览器工具。
-
----
-
-## 原理
-
-**不变量**：一次沙箱调用返回给模型的内容永远不超过 `CB_MAX_OUTPUT_BYTES`
-（默认 8 KB）。其余的被截断、被索引、或被丢弃。
-
-**度量**：Node 运行时会被注入一段计量前导代码，统计脚本从磁盘、子进程、以及**网络
-响应体**读进来的每一个字节（包含 `import { readFileSync } from "node:fs"` 这种具名
-导入——做法是在源码层面重写 import 说明符）。`ctx_stats` 取"脚本打印的量"和"脚本
-实际读的量"的较大者，所以沙箱里抓一个网页会按整页计功，而不是按它打印的三行。
-
-两个诚实的限制：这是**下界**（只观测 `node:fs` / `node:fs/promises` /
-`node:child_process` 和 `Response` 的 body 读取，且只对 Node 生效）；网络大小按
-**解压后**的 body 计，不用 `Content-Length`——因为服务器报的是压缩后大小，
-gzip 页面会低报 3–4 倍。
-
-**检索**：按 markdown 标题切块、代码块不切断，用 `porter unicode61` 建索引。
-中文会按**单字空格分隔**再入库——否则 SQLite 会把一整串汉字当成一个 token，
-中文搜索直接失效。
 
 ---
 
@@ -263,9 +404,10 @@ gzip 页面会低报 3–4 倍。
 |---|---|---|
 | `CONTEXT_BUDGET_DIR` | `~/.context-budget` | 存储根目录 |
 | `CONTEXT_BUDGET_PROJECT` | `cwd` | 沙箱边界所在的工作区 |
-| `CONTEXT_BUDGET_HOOKS` | `on` | 设为 `off` 可关闭 hook 路由 |
+| `CONTEXT_BUDGET_HOOKS` | `on` | 设为 `off` 可关闭钩子路由 |
 | `CONTEXT_BUDGET_FETCH` | `nudge` | 网页抓取策略：`nudge` \| `cancel` \| `off`，见下文 |
 | `CONTEXT_BUDGET_FETCH_ALLOW` | — | 永不拦截的域名，逗号分隔，如 `docs.internal,example.com` |
+| `CONTEXT_BUDGET_HOOK_ENTRY` | — | 覆盖生成启动器里写死的钩子入口路径 |
 | `CONTEXT_BUDGET_MCP_ASSUME` | — | `registered` \| `missing`，强制指定"改道目标是否存在"（便于测试） |
 | `CB_MAX_OUTPUT_BYTES` | `8192` | 单次沙箱调用返回的 stdout 上限 |
 | `CB_TIMEOUT_MS` | `30000` | 沙箱墙钟预算 |
@@ -276,50 +418,91 @@ CLI：`context-budget mcp | setup | mcp-config | uninstall | doctor | stats | so
 
 ---
 
-## 它**故意不做**什么
+## 原理
 
-- **不管模型怎么说话。** 强行要求简短会拉低编码 benchmark。这里只决定*数据往哪走*。
-- **不改你的文件。** 沙箱写入会被丢弃，这正是设计意图。
-- **不动你的 Cline 配置。** `init` 只写它自己创建的文件。偷偷改写用户配置是 hook 类
-  工具失去信任的最快方式。
-- **不联网、不上报。** 没有遥测、没有账号。数据全在本地 SQLite 里，
-  `context-budget purge` 一键清空。
+**不变量**：一次沙箱调用返回给模型的内容永远不超过 `CB_MAX_OUTPUT_BYTES`
+（默认 8 KB）。其余的被截断、被索引、或被丢弃。
+
+**度量**：Node 运行时会被注入一段计量前导代码，统计脚本从磁盘、子进程、以及**网络
+响应体**读进来的每一个字节（包含 `import { readFileSync } from "node:fs"` 这种具名
+导入——做法是在源码层面重写 import 说明符）。`ctx_stats` 取"脚本打印的量"和"脚本
+实际读的量"的较大者，所以沙箱里抓一个网页会按整页计功，而不是按它打印的三行。
+
+两个诚实的限制：这是**下界**（只观测 `node:fs` / `node:fs/promises` /
+`node:child_process` 和 `Response` 的 body 读取，且只对 Node 生效）；网络大小按
+**解压后**的 body 计，不用 `Content-Length`——因为服务器报的是压缩后大小，
+gzip 页面会低报 3–4 倍。
+
+**检索**：按 markdown 标题切块、代码块不切断，用 `porter unicode61` 建索引。
+中文会按**单字空格分隔**再入库——否则 SQLite 会把一整串汉字当成一个 token，
+中文搜索直接失效。查询用 AND 匹配，无果时退到 OR，再退到子串扫描以支持部分标识符。
+
+---
+
+## 排错
+
+| 症状 | 原因 | 处理 |
+|---|---|---|
+| `context-budget: command not found` | `npm link` 没进 PATH | 修 npm prefix，或用 `node /path/bin/cli.mjs` |
+| Cline 里没有 `ctx_*` 工具 | MCP 没注册，或 Cline 没重启 | `context-budget doctor` → `setup --yes` → 重启 |
+| 钩子从不触发 | "Enable Hooks" 没开 | Settings → Features → 勾上 |
+| CLI 里钩子不触发 | `--yolo` 按设计禁用钩子 | 用 `--act` 或 `--plan` |
+| `[ ] node:sqlite + FTS5` | Node 低于 22.5 | 升级 Node |
+| `[ ] knowledge` / `[ ] ledger`，提示 "unable to open database file" | 存储根目录不可写（网络盘、只读挂载、受限沙箱） | 把 `CONTEXT_BUDGET_DIR` 指到可写的本地路径 |
+| `! could not enable WAL` | 该文件系统不支持 WAL | 无害；会自动退回到默认日志模式 |
+| 中文检索查不到 | — | 不该发生（中文按单字分词）。真遇到就 `purge` 后重新索引 |
+| 本来好好的，突然不灵了 | 升级后包被移动 | `context-budget doctor --fix` |
+| `setup` 报某个文件 `SKIPPED` | 它要用的路径存在同名普通文件 | 把那个文件移开再跑 |
 
 ---
 
 ## 已知限制（先读再评价）
 
-1. **Cline CLI 的 `--yolo` 模式会禁用 hooks。** 用 `--act` 或 `--plan`。
-2. **扩展的 hook 路径是 `.clinerules/hooks/PreToolUse`**（无扩展名），并且需要在
-   设置里勾选 "Enable Hooks"。Cline 官方示例用的是 bash；Windows 上 `init` 会额外
-   生成一个 `.cmd`。**先用上面那条 echo 命令验证再信任它。**
-3. **Cline 钩子的输出字段是 `contextModification`，不是 `context`。** 扩展校验的是
+1. **Cline 扩展官方不支持 Windows 钩子。** Cline 自己的钩子文档写明钩子通过
+   shebang 感知的 shell 执行，且 Windows "not currently supported"。`setup` 仍然会写
+   `.cmd` 和 Node 原生 `.mjs` 启动器，但在 Windows 上请把钩子当作 best-effort：
+   先跑第 5 步那条 echo 命令验证再依赖路由。**沙箱工具本身不受影响**，各平台都能用。
+2. **Cline 钩子的输出字段是 `contextModification`，不是 `context`。** 扩展校验的是
    `{ cancel, contextModification, errorMessage }`
    （`apps/vscode/src/core/hooks/hook-factory.ts`）；SDK 的文件钩子读的是
    `context`。本项目的钩子两个都发——因为写错是**静默失败**：钩子退出码 0，
    模型却永远看不到那句话。
-4. **PreCompact 给的是临时文件。** Cline 传入 `contextJsonPath` / `contextRawPath`，
+3. **PreCompact 给的是临时文件。** Cline 传入 `contextJsonPath` / `contextRawPath`，
    钩子一返回就删除，所以必须在钩子内部完成抓取。我们构建一张 ≤2 KB 的工作状态卡
    并把完整历史索引起来；**在这一刻故意不注入任何东西**——现在注入的内容几秒后就会
    被压缩掉。状态卡由之后第一个触发的钩子交回：`TaskResume`，或者自动压缩后同一任务
    继续时的 `PreToolUse` / `PostToolUse`。
-5. **Cline 扩展官方不支持 Windows 钩子。** Cline 自己的钩子文档写明钩子通过
-   shebang 感知的 shell 执行，且 Windows "not currently supported"。`setup` 仍然会写
-   `.cmd` 和 Node 原生 `.mjs` 启动器，但在 Windows 上请把钩子当作 best-effort：
-   先用下面的 echo 命令验证再依赖路由。**沙箱工具本身不受影响**，各平台都能用。
-6. **Cline 子代理访问不到 MCP server**，所以 `use_subagents` 里用不了沙箱工具。
+4. **Cline 子代理访问不到 MCP server**，所以 `use_subagents` 里用不了沙箱工具。
 5. **只有 Node 运行时被计量**，Python/bash/PowerShell 只统计 stdout 量，收益被低估。
 6. **沙箱是进程边界，不是安全边界。** 黑名单和路径边界是防"粗心的 agent"，不是监狱。
    环境变量是**故意继承**的，这样 `gh`/`aws`/`kubectl` 能正常工作，而密钥不进上下文。
 
 ---
 
+## 它**故意不做**什么
+
+- **不管模型怎么说话。** 强行要求简短会拉低编码 benchmark。这里只决定*数据往哪走*。
+- **不改你的文件。** 沙箱写入会被丢弃，这正是设计意图。
+- **除一个键外不动你的 Cline 配置。** `init` 和 `setup` 只写自己拥有的文件，
+  并且只往 `mcpServers` 合并一个条目。偷偷改写用户配置是钩子类工具失去信任的最快方式。
+- **不联网、不上报。** 没有遥测、没有账号。数据全在本地 SQLite 里，
+  `context-budget purge` 一键清空。
+
+---
+
 ## 开发
 
 ```bash
-npm test          # 39 个单元测试
-npm run test:e2e  # 用真实 MCP 协议跟真实 server 对话
-npm run bench -- src
+npm test              # 69 个单元测试
+npm run test:e2e      # 真实 MCP 协议 over stdio
+npm run test:scenario # 钩子路由矩阵，真实进程
+npm run test:workflow # 真实联网端到端
+npm run test:audit    # 84 项：每个工具、每条 CLI 命令、每个钩子
+npm run test:audit2   # 38 项：协议滥用、脏存储、并发
+npm run test:audit3   # 30 项：数据丢失、检索质量、TTL
+npm run test:recipe   # 35 项：把本文档里的安装步骤真跑一遍
+npm run test:all      # 以上全部
+npm run bench -- src  # 载荷对比
 ```
 
 ## 许可证
