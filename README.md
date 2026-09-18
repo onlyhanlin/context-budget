@@ -109,6 +109,65 @@ context-budget setup --hooks-only  # skip MCP registration
 context-budget setup --mcp-only    # skip the hook files
 ```
 
+### Configuring the MCP server by hand
+
+`setup` writes this for you. You need the block below when it **cannot** — an
+editor it does not recognise, a portable install, a locked-down settings file, or
+any MCP client that is not Cline. `context-budget mcp-config` prints the same
+thing at any time; it is generated from the same source of truth the installer
+writes, so it can never drift.
+
+```json
+{
+  "mcpServers": {
+    "context-budget": {
+      "command": "context-budget",
+      "args": ["mcp"],
+      "disabled": false,
+      "autoApprove": [
+        "ctx_execute",
+        "ctx_execute_file",
+        "ctx_batch",
+        "ctx_index",
+        "ctx_search",
+        "ctx_stats"
+      ]
+    }
+  }
+}
+```
+
+Where that goes:
+
+| Client | Location |
+|---|---|
+| Cline (VS Code / JetBrains) | **MCP Servers → Configure MCP Servers** in the Cline panel. The panel opens the right file for you; that is safer than guessing the path. |
+| Cline CLI | `~/.cline/data/settings/cline_mcp_settings.json` |
+
+Notes:
+
+- `"command": "context-budget"` requires the CLI on your `PATH`
+  (`npm install -g context-budget`, or `npm link` from a clone). If you would
+  rather not install it globally, use an absolute path to `bin/cli.mjs`:
+  `"command": "node", "args": ["/abs/path/to/context-budget/bin/cli.mjs", "mcp"]`.
+- `autoApprove` is a **Cline** field; other clients ignore it. Leaving tools out
+  of it is fine — you will simply be asked to confirm each call.
+- `ctx_doctor` is deliberately not auto-approved: it is a diagnostic you should
+  read, not something the model should call on its own.
+- The server speaks plain stdio MCP, so any client works:
+
+  ```json
+  { "command": "context-budget", "args": ["mcp"] }
+  ```
+
+Two things must both be true before any of this has an effect:
+
+1. the MCP server is registered (the block above), **and**
+2. **Cline → Settings → Features → "Enable Hooks"** is ticked.
+
+Verify with `context-budget doctor` — it lists every Cline install it found and
+whether `context-budget` is registered in each.
+
 ### Then do the one thing it cannot do for you
 
 **Cline → Settings → Features → "Enable Hooks".**
@@ -254,7 +313,7 @@ three safety valves:
 | `CB_INDEX_TTL_MS` | `86400000` | Freshness window for an indexed source. |
 | `CB_KB_TTL_MS` | `1209600000` | Knowledge-base garbage collection age (14 days). |
 
-CLI: `context-budget setup | uninstall | doctor [--fix] | stats | sources | index | search | purge | reset | mcp`.
+CLI: `context-budget mcp | setup | mcp-config | uninstall | doctor | stats | sources | index | search | purge | reset | hook | version`.
 
 ---
 

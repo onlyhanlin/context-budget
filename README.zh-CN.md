@@ -99,6 +99,63 @@ context-budget setup --hooks-only  # 只装 hook，不注册 MCP
 context-budget setup --mcp-only    # 只注册 MCP，不装 hook
 ```
 
+### 手工配置 MCP server
+
+`setup` 会自动写入。下面这段是给它**写不了**的情况准备的——探测不到的编辑器、
+便携版安装、被锁住不能改的配置文件、或者**根本不是 Cline** 的 MCP 客户端。
+`context-budget mcp-config` 命令随时可以打印同一段内容；它是从安装程序写入的
+同一份数据源生成的，不会漂移。
+
+```json
+{
+  "mcpServers": {
+    "context-budget": {
+      "command": "context-budget",
+      "args": ["mcp"],
+      "disabled": false,
+      "autoApprove": [
+        "ctx_execute",
+        "ctx_execute_file",
+        "ctx_batch",
+        "ctx_index",
+        "ctx_search",
+        "ctx_stats"
+      ]
+    }
+  }
+}
+```
+
+写到哪里：
+
+| 客户端 | 位置 |
+|---|---|
+| Cline（VS Code / JetBrains） | Cline 面板里的 **MCP Servers → Configure MCP Servers**。它会自动打开正确的文件，比你自己猜路径稳。 |
+| Cline CLI | `~/.cline/data/settings/cline_mcp_settings.json` |
+
+几点说明：
+
+- `"command": "context-budget"` 要求这个命令在 `PATH` 里
+  （`npm install -g context-budget`，或在克隆目录里 `npm link`）。不想全局安装
+  就用 `bin/cli.mjs` 的绝对路径：
+  `"command": "node", "args": ["/abs/path/to/context-budget/bin/cli.mjs", "mcp"]`。
+- `autoApprove` 是 **Cline** 的字段，别的客户端会忽略。不写进去也行，
+  只是每次调用都会问你一下。
+- `ctx_doctor` 故意没有放进自动批准：它是给人看的自检，不该让模型自己乱调。
+- 这个 server 说的是标准 stdio MCP 协议，任何客户端都能用：
+
+  ```json
+  { "command": "context-budget", "args": ["mcp"] }
+  ```
+
+**两件事必须同时成立才生效**：
+
+1. MCP server 已注册（就是上面那段），**并且**
+2. **Cline → Settings → Features → 勾选 "Enable Hooks"**。
+
+用 `context-budget doctor` 验证——它会列出找到的每一处 Cline 安装，以及
+`context-budget` 在其中是否已注册。
+
 ### 然后做它替你做不了的那一步
 
 **Cline → Settings → Features → 勾选 "Enable Hooks"。**
@@ -215,7 +272,7 @@ gzip 页面会低报 3–4 倍。
 | `CB_INDEX_TTL_MS` | `86400000` | 索引源的新鲜度窗口 |
 | `CB_KB_TTL_MS` | `1209600000` | 知识库回收期限（14 天） |
 
-CLI：`context-budget setup | uninstall | doctor [--fix] | stats | sources | index | search | purge | reset | mcp`。
+CLI：`context-budget mcp | setup | mcp-config | uninstall | doctor | stats | sources | index | search | purge | reset | hook | version`。
 
 ---
 

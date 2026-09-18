@@ -13,18 +13,19 @@ import * as store from "../src/store.mjs";
 import * as stats from "../src/stats.mjs";
 import { ctxDoctor, ctxStats, ctxSearch, ctxIndex } from "../src/tools.mjs";
 import { formatBytes } from "../src/text.mjs";
-import { buildPlan, formatPlan, applySetup, verify, uninstall, repair } from "../src/setup.mjs";
+import { buildPlan, formatPlan, applySetup, verify, uninstall, repair, mcpConfigSnippet } from "../src/setup.mjs";
 import { HOOK_EVENTS, packageRoot } from "../hooks/install.mjs";
 
 const USAGE = `context-budget ${VERSION}
 
 Install
-  context-budget setup [--yes]         dry run by default; --yes applies
+  context-budget setup [--yes]         dry run by default; --yes applies (and prints the MCP config)
         --global                       install global rules/hooks (~/Documents/Cline)
         --hooks-only                   skip MCP server registration
         --mcp-only                     skip hook + rules files
   context-budget uninstall [--yes] [--global]
   context-budget doctor [--fix]        diagnose; --fix repairs stale hook launchers
+  context-budget mcp-config            print the MCP server config to paste manually
 
 Run
   context-budget mcp                   start the MCP server (Cline launches this)
@@ -36,6 +37,8 @@ Inspect
   context-budget search <query...>
   context-budget purge --yes
   context-budget reset [--all]
+  context-budget hook <event>          run a file hook on stdin (used by generated launchers)
+  context-budget version
 
 Environment
   CONTEXT_BUDGET_DIR       storage root (default ~/.context-budget)
@@ -95,6 +98,10 @@ async function main() {
       });
 
       out(formatPlan(plan));
+
+      out("");
+      out("MCP server config (what setup writes; paste it by hand if your file was not detected):");
+      out(mcpConfigSnippet());
 
       const apply = flags.has("yes") || flags.has("y");
       if (!apply) {
@@ -177,6 +184,11 @@ async function main() {
     }
 
     /* ------------------------------------------------------------- inspect */
+
+    case "mcp-config": {
+      out(mcpConfigSnippet());
+      return;
+    }
 
     case "stats": {
       if (flags.has("json")) {

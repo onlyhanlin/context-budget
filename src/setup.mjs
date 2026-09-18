@@ -9,8 +9,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { discoverClineTargets, describeTargets } from "./cline-paths.mjs";
-import { planMerge, planRemoval, applyMerge, SERVER_NAME } from "./mcp-config.mjs";
+import { planMerge, planRemoval, applyMerge, SERVER_NAME, serverEntry } from "./mcp-config.mjs";
 import { workspacePlan, globalPlan, applyPlan, removePlan, repair, readRecordedEntry, ENTRY } from "../hooks/install.mjs";
+
+/**
+ * The exact JSON that setup writes, generated from the same source of truth so
+ * it can never drift from what actually lands in the settings file.
+ *
+ * Needed whenever detection fails — an unrecognised editor, a portable install,
+ * or a client that is not Cline at all — because otherwise the user has no idea
+ * what to type.
+ */
+export function mcpConfigSnippet() {
+  return JSON.stringify({ mcpServers: { [SERVER_NAME]: serverEntry() } }, null, 2);
+}
 
 export function buildPlan({ root = process.cwd(), global = false, hooksOnly = false, mcpOnly = false } = {}) {
   const targets = discoverClineTargets();
