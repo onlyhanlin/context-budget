@@ -174,7 +174,10 @@ export function chunkDocument(raw, { maxChars = limits.chunkChars, overlap = lim
   const final = [];
   for (const section of out) {
     if (section.body.length <= maxChars * 1.5) { final.push(section); continue; }
-    for (let i = 0; i < section.body.length; i += maxChars - overlap) {
+    // A misconfigured overlap >= maxChars would make the step non-positive and
+    // loop forever; clamp the step so the guarantee is "it terminates".
+    const step = Math.max(1, maxChars - overlap);
+    for (let i = 0; i < section.body.length; i += step) {
       final.push({ title: section.title, body: section.body.slice(i, i + maxChars) });
     }
   }
@@ -282,12 +285,17 @@ function runSearch(matchExpr, limit, sourceFilter) {
  * like "first-output-alpha" happily matches a document that merely contains the
  * word "output", and the model has no way to tell that apart from a real hit.
  */
+/** Escape LIKE wildcards so user input is matched literally, never as patterns. */
+function escapeLike(term) {
+  return String(term).replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 function runLikeSearch(terms, limit, sourceFilter, mode = "and") {
   const handle = open();
   const join = mode === "or" ? " OR " : " AND ";
-  const clauses = terms.map(() => "(body LIKE ? OR title LIKE ?)").join(join);
+  const clauses = terms.map(() => "(body LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')").join(join);
   const args = [];
-  for (const term of terms) args.push(`%${term}%`, `%${term}%`);
+  for (const term of terms) args.push(`%${escapeLike(term)}%`, `%${escapeLike(term)}%`);
   const sql =
     "SELECT id, source, title, body, 0 AS score FROM chunks WHERE (" +
     clauses +
@@ -331,15 +339,22 @@ export function search(queries, { limit = 6, perQuery = 2, source = null, mode =
       }
       if (!rows.length) {
         // Substring fallback: catches partial identifiers ("useEff" -> "useEffect").
+        // Guarded: a pathologically long query (megabyte patterns, tens of
+        // thousands of terms) can exceed SQLite's expression limits, and the
+        // failure must degrade to an empty result, never escape to the caller.
         const longTerms = terms.filter((t) => t.length >= 3);
         if (longTerms.length) {
-          rows = runLikeSearch(longTerms, limit, source, "and");
-          if (!rows.length && longTerms.length > 1) {
-            const loose = runLikeSearch(longTerms, limit, source, "or");
-            if (loose.length) {
-              rows = loose;
-              partial = true;
+          try {
+            rows = runLikeSearch(longTerms, limit, source, "and");
+            if (!rows.length && longTerms.length > 1) {
+              const loose = runLikeSearch(longTerms, limit, source, "or");
+              if (loose.length) {
+                rows = loose;
+                partial = true;
+              }
             }
+          } catch {
+            rows = [];
           }
         }
       }

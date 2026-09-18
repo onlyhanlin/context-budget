@@ -12,13 +12,14 @@ import path from "node:path";
 const DENY_RULES = [
   { re: /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+\/(\s|$)/, why: "recursive delete of filesystem root" },
   { re: /\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+~(\/|\s|$)/, why: "recursive delete of home directory" },
+  { re: /\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+(\.\.?\/?)(\s|$)/, why: "recursive delete of the current or parent directory" },
   { re: /\bmkfs(\.|\s)/, why: "filesystem format" },
   { re: /\bdd\s+[^|]*of=\/dev\/(sd|nvme|hd)/, why: "raw write to a block device" },
   { re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, why: "fork bomb" },
-  { re: /\bshutdown\b|\breboot\b|\bhalt\b/, why: "host power control" },
+  { re: /(^|[;&|]\s*)(sudo\s+)?(shutdown|reboot|halt)(\s|$)/, why: "host power control" },
   { re: /\bformat\s+[a-zA-Z]:/i, why: "Windows volume format" },
   { re: /\bRemove-Item\b[^|]*-Recurse[^|]*-Force[^|]*\b[A-Za-z]:\\(\s|$)/i, why: "recursive delete of a drive root" },
-  { re: /\bgit\s+push\s+[^|]*--force(?!-with-lease)/, why: "force push (use --force-with-lease)" },
+  { re: /\bgit\s+push\s+[^|]*(?:--force\b|-f\b)(?!-with-lease)/, why: "force push (use --force-with-lease)" },
   { re: /\b(curl|wget|iwr|Invoke-WebRequest)\b[^|]*\|\s*(ba)?sh/i, why: "pipe remote content into a shell" },
 ];
 
