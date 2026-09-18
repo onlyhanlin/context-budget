@@ -213,6 +213,8 @@ test("normalizeLanguage handles null, undefined and case", () => {
   assert.equal(normalizeLanguage("JavaScript"), "javascript");
   assert.equal(normalizeLanguage("PY"), "python");
   assert.equal(normalizeLanguage("PowerShell"), "powershell");
+  assert.equal(normalizeLanguage("BAT"), "batch");
+  assert.equal(normalizeLanguage("Cmd"), "batch");
 });
 
 test("the full stdout count is reported for accounting even on truncation", async () => {
@@ -250,4 +252,34 @@ test("powershell runtime is detected on Windows (regression for --version probe)
   });
   assert.equal(res.exitCode, 0, res.stderr);
   assert.ok(res.stdout.includes("ps-probe-ok"), `stdout was: ${res.stdout}`);
+});
+
+test("batch runtime is detected on Windows and exposes filePath for ctx_execute_file", async () => {
+  // Skip gracefully on platforms without cmd.exe (macOS, Linux).
+  const resolved = resolveRuntime("batch");
+  if (!resolved) {
+    assert.ok(true, "no batch runtime on this platform — skipping");
+    return;
+  }
+  const res = await run({
+    language: "batch",
+    code: `@echo off\necho batch-probe-ok`,
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.ok(res.stdout.includes("batch-probe-ok"), `stdout was: ${res.stdout}`);
+  assert.equal(res.language, "batch");
+  assert.equal(res.command, "cmd");
+
+  // ctx_execute_file path: the preamble must expose `filePath`, since batch
+  // cannot bind a multiline `content` variable.
+  const src = path.join(os.tmpdir(), `cb-batch-src-${Date.now()}.txt`);
+  fs.writeFileSync(src, "file-content-here", "utf8");
+  const res2 = await run({
+    language: "batch",
+    code: `type "%filePath%"`,
+    filePath: src,
+  });
+  fs.rmSync(src, { force: true });
+  assert.equal(res2.exitCode, 0, res2.stderr);
+  assert.ok(res2.stdout.includes("file-content-here"), `stdout was: ${res2.stdout}`);
 });

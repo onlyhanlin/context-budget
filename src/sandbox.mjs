@@ -234,6 +234,23 @@ const RUNTIMES = {
       `$filePath = $env:CB_FILE_ORIG\n` +
       `if ($filePath) { $content = Get-Content -Raw -LiteralPath $filePath } else { $content = $null }\n`,
   },
+  batch: {
+    aliases: ["bat", "cmd", "cmdscript"],
+    candidates: ["cmd"],
+    ext: ".bat",
+    // `cmd --version` does not exist (and `/d /c exit 0` is the only probe form
+    // that returns exit code 0 across cmd.exe implementations).
+    probeArgs: ["/d", "/c", "exit 0"],
+    args: (file) => ["/d", "/c", file],
+    // Batch has no multiline string variable, so `content` cannot be bound the
+    // way the other runtimes bind it. Expose `filePath` instead; the script can
+    // `type "%filePath%"` when it needs the file. `if not ...==""` (rather than
+    // `if defined`) is used because CB_FILE_ORIG is always present, sometimes
+    // empty — and an empty env var counts as "defined" on some cmd builds.
+    preamble: () =>
+      `@echo off\n` +
+      `if not "%CB_FILE_ORIG%"=="" set "filePath=%CB_FILE_ORIG%"\n`,
+  },
 };
 
 const resolvedCache = new Map();

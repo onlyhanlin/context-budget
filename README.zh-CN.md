@@ -231,7 +231,8 @@ B. ctx_execute（一个脚本，只回 stdout）
 - **Node.js ≥ 22.5。** 知识库用内置 `node:sqlite` + FTS5，**无需原生编译**，
   不需要 `better-sqlite3`。
 - Cline。**扩展**能通过钩子拿到自动路由；任何 MCP 客户端都能拿到工具，但没有钩子。
-- Python / bash / PowerShell 是 `ctx_execute` 的可选运行时，`context-budget doctor`
+- Python / bash / PowerShell / Windows 批处理是 `ctx_execute` 的可选运行时，
+  `context-budget doctor`
   会报告装了哪些。
 
 ### 1. 拿到 CLI
@@ -548,7 +549,7 @@ gzip 页面会低报 3–4 倍。
    被压缩掉。状态卡由之后第一个触发的钩子交回：`TaskResume`，或者自动压缩后同一任务
    继续时的 `PreToolUse` / `PostToolUse`。
 4. **Cline 子代理访问不到 MCP server**，所以 `use_subagents` 里用不了沙箱工具。
-5. **只有 Node 运行时被计量**，Python/bash/PowerShell 只统计 stdout 量，收益被低估。
+5. **只有 Node 运行时被计量**，Python/bash/PowerShell/批处理 只统计 stdout 量，收益被低估。
 6. **沙箱是进程边界，不是安全边界。** 黑名单和路径边界是防"粗心的 agent"，不是监狱。
    环境变量是**故意继承**的，这样 `gh`/`aws`/`kubectl` 能正常工作，而密钥不进上下文。
 

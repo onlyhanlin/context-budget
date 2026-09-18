@@ -248,7 +248,8 @@ payload kept out of context: 61.8 KB (99.9%)
   FTS5 — no native compilation, no `better-sqlite3`.
 - Cline. The **extension** gets automatic routing via hooks; any MCP client gets
   the tools without them.
-- Python, bash and PowerShell are optional runtimes for `ctx_execute`.
+- Python, bash, PowerShell and Windows batch are optional runtimes for
+  `ctx_execute`.
   `context-budget doctor` reports which are available.
 
 ### 1. Get the CLI
@@ -607,8 +608,8 @@ falling back to OR and then to a substring scan for partial identifiers.
 4. **Cline subagents cannot reach MCP servers.** The sandbox tools are
    unavailable inside `use_subagents` runs, so that portion of the saving is
    not reachable.
-5. **Only Node runtimes are instrumented.** Python, bash and PowerShell report
-   stdout volume only, so their savings are understated.
+5. **Only Node runtimes are instrumented.** Python, bash, PowerShell and batch
+   report stdout volume only, so their savings are understated.
 6. **The sandbox is a process boundary, not a security boundary.** The deny-list
    and path containment are guardrails against a careless agent, not a jail.
    Credentials in the environment are inherited on purpose, so `gh`, `aws` and

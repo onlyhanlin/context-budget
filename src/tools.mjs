@@ -16,7 +16,7 @@ import * as store from "./store.mjs";
 import * as stats from "./stats.mjs";
 import { formatBytes, estimateTokens } from "./text.mjs";
 
-const SHELL_LANGUAGES = new Set(["shell", "powershell"]);
+const SHELL_LANGUAGES = new Set(["shell", "powershell", "batch"]);
 
 function renderHeader({ res, rawBytes = 0, outBytes = 0, note = "" }) {
   const parts = [];
