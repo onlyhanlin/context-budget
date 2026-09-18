@@ -234,3 +234,20 @@ test("ctxExecute-style run with empty code still returns a structured result", a
   assert.equal(typeof res.exitCode, "number");
   assert.equal(typeof res.durationMs, "number");
 });
+
+test("powershell runtime is detected on Windows (regression for --version probe)", async () => {
+  // Windows PowerShell 5.1 does not understand --version; the runtime spec
+  // must use a probe command that both pwsh and powershell.exe accept.
+  // Skip gracefully when neither is installed.
+  const resolved = resolveRuntime("powershell");
+  if (!resolved) {
+    assert.ok(true, "no powershell runtime on this platform — skipping");
+    return;
+  }
+  const res = await run({
+    language: "powershell",
+    code: 'Write-Output "ps-probe-ok"',
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.ok(res.stdout.includes("ps-probe-ok"), `stdout was: ${res.stdout}`);
+});

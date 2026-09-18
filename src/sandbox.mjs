@@ -226,6 +226,9 @@ const RUNTIMES = {
     aliases: ["pwsh", "ps1"],
     candidates: ["pwsh", "powershell"],
     ext: ".ps1",
+    // Windows PowerShell 5.1 does not understand --version; use a trivial
+    // command that both pwsh and powershell.exe can execute successfully.
+    probeArgs: ["-NoProfile", "-NonInteractive", "-Command", "exit 0"],
     args: (file) => ["-NoProfile", "-NonInteractive", "-File", file],
     preamble: () =>
       `$filePath = $env:CB_FILE_ORIG\n` +
@@ -241,9 +244,10 @@ export function resolveRuntime(name) {
   if (!key) return null;
   if (resolvedCache.has(key)) return resolvedCache.get(key);
   const spec = RUNTIMES[key];
+  const probeArgs = spec.probeArgs ?? ["--version"];
   let found = null;
   for (const candidate of spec.candidates) {
-    const probe = spawnSync(candidate, ["--version"], { stdio: "ignore", windowsHide: true, shell: false });
+    const probe = spawnSync(candidate, probeArgs, { stdio: "ignore", windowsHide: true, shell: false });
     if (!probe.error && probe.status === 0) {
       found = { language: key, command: candidate, spec };
       break;
