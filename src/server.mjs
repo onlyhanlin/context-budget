@@ -24,7 +24,7 @@ export const TOOL_DEFS = [
     description:
       "Run code in an isolated subprocess. ONLY stdout returns to the conversation; file contents, logs and API payloads the script touches never enter context.\n\n" +
       "USE THIS when you intend to PROCESS data — filter, count, aggregate, parse, transform, compare, search. Program the analysis instead of computing it by reading raw data into context.\n\n" +
-      "DO NOT USE for: editing files (sandbox writes are discarded), running state-changing commands (git commit, npm install), or observing a short fixed output you already know is small.\n\n" +
+      "DO NOT USE for: editing files (use the native edit tool so the change is visible and approved), running state-changing commands (git commit, npm install), or observing a short fixed output you already know is small.\n\n" +
       "The script may read files and make network calls. Add \"intent\" when the output may be large and you want only the matching sections back.",
     inputSchema: {
       type: "object",

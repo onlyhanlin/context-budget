@@ -162,8 +162,18 @@ head("Sandbox · content edges");
     const binary = await s.call("ctx_execute", { language: "javascript", code: 'process.stdout.write(Buffer.from([0xff,0xfe,0xfd]));' });
     check("sandbox", "invalid UTF-8 bytes are replaced, not fatal", !/failed/i.test(txt(binary)), txt(binary).slice(0, 120));
 
-    const writes = await s.call("ctx_execute", { language: "javascript", code: 'require("node:fs").writeFileSync("sandbox-escape.txt", "x"); console.log("wrote");' });
-    check("sandbox", "sandbox file writes land in the temp dir only", !fs.existsSync(path.join(work, "sandbox-escape.txt")), "leaked into the workspace");
+    // The sandbox is a CONTEXT boundary, not a filesystem jail: it runs in the
+    // project directory with the user's permissions, so a write really happens.
+    // This check used to assert the opposite, and only passed because
+    // require() was broken and nothing was written at all.
+    const probeName = "cb-sandbox-write-probe.txt";
+    const writes = await s.call("ctx_execute", {
+      language: "javascript",
+      code: `require("node:fs").writeFileSync("${probeName}", "x"); console.log("cjs write ok");`,
+    });
+    check("sandbox", "CommonJS require() works in the sandbox", /cjs write ok/.test(txt(writes)), txt(writes).slice(0, 200));
+    check("sandbox", "a script write really lands in the project directory", fs.existsSync(path.join(work, probeName)));
+    check("sandbox", "only console.log() output crossed back", !txt(writes).includes("cb-sandbox-write-probe"));
 
     const bigPrint = await s.call("ctx_execute", { language: "javascript", code: 'process.stdout.write("A".repeat(50 * 1024 * 1024));', timeout_ms: 60000 });
     check("sandbox", "a 50 MB print is capped without exhausting memory", Buffer.byteLength(txt(bigPrint), "utf8") < 200000, `${Buffer.byteLength(txt(bigPrint), "utf8")} B`);

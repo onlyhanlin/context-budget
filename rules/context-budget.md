@@ -42,7 +42,8 @@ One script replaces ten tool calls, and the raw files never enter context.
 - **The output is short and you already know it** (`pwd`, `git status` on a
   clean tree, `whoami`) → run it directly; the sandbox adds overhead.
 - **The command changes state** (`git commit`, `npm install`, `mkdir`) → native
-  tool. Sandbox file writes are discarded.
+  tool, so the user sees and approves it. The sandbox runs in your project with
+  your permissions; it is a context boundary, not a filesystem jail.
 - **You need a browser interaction**, not a page fetch → native browser tool.
 
 ## Web fetches

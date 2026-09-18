@@ -460,8 +460,9 @@ from `mcpServers`, again with a backup.
   the exact bytes to match against.
 - **The output is short and known** (`pwd`, a clean `git status`) → run it
   directly; the sandbox adds overhead for no gain.
-- **The command changes state** (`git commit`, `npm install`) → native tool.
-  Sandbox file writes are discarded.
+- **The command changes state** (`git commit`, `npm install`) → native tool, so
+  the user sees and approves it. The sandbox is not a filesystem jail: it runs in
+  your project directory with your permissions, and writes really happen.
 - **You need a browser interaction**, not a page fetch → native browser tool.
 
 ---
@@ -620,8 +621,13 @@ falling back to OR and then to a substring scan for partial identifiers.
 - **It does not tell the model how to write.** Brevity prompts measurably hurt
   coding benchmarks. This only routes *where data goes*, never *how the model
   talks*.
-- **It does not edit your files.** Sandbox writes are discarded; that is the
-  point.
+- **It is a context boundary, not a filesystem jail.** Sandboxed scripts run in
+  your project directory with your permissions, and a script that writes a file
+  really writes it. That is deliberate — the sandbox has to be able to `readdir`
+  and `readFile` your source to be useful at all. What it guarantees is that
+  **only `console.log()` output reaches the conversation**, never the raw bytes.
+  Use the native edit tools when you intend to change files, so the change is
+  visible and approved.
 - **It does not touch your Cline settings beyond one key.** `init` and `setup`
   write only files they own, and merge exactly one entry into `mcpServers`.
   Auto-rewriting a user's config is how a hook tool loses people's trust.
